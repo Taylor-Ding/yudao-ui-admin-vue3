@@ -749,16 +749,14 @@ const selectNextAssigneesConfirm = (id: string, userList: any[]) => {
 }
 /** 审批通过时，校验每个自选审批人的节点是否都已配置了审批人 */
 const validateNextAssignees = () => {
-  // TODO @小北：可以考虑 Object.keys(nextAssigneesActivityNode.value).length === 0) return true；减少括号层级
-  // 如果需要自选审批人，则校验自选审批人
-  if (Object.keys(nextAssigneesActivityNode.value).length > 0) {
-    // 校验每个节点是否都已配置审批人
-    for (const item of nextAssigneesActivityNode.value) {
-      if (isEmpty(approveReasonForm.nextAssignees[item.id])) {
-        // TODO @小北：可以打印下节点名，嘿嘿。
-        message.warning('下一个节点的审批人不能为空!')
-        return false
-      }
+  if (Object.keys(nextAssigneesActivityNode.value).length === 0) {
+    return true
+  }
+  // 如果需要自选审批人，则校验每个节点是否都已配置审批人
+  for (const item of nextAssigneesActivityNode.value) {
+    if (isEmpty(approveReasonForm.nextAssignees[item.id])) {
+      message.warning('下一个节点的审批人不能为空!')
+      return false
     }
   }
   return true
@@ -1080,11 +1078,6 @@ const validateNormalForm = async () => {
   }
 }
 
-/**
- * TODO @小北  TO  @芋道
- * 问题：这里存在一种场景会出现问题，流程发起后，A节点审批完成，B节点没有可编辑的流程字段且B节点为自选审批人节点，会导致流程审批人为空，
- * 原因：因为没有可编辑的流程字段时props.writableFields为空，参数variables传递时也为空
- */
 /** 从可以编辑的流程表单字段，获取需要修改的流程实例的变量 */
 const getUpdatedProcessInstanceVariables = () => {
   const variables = {}
