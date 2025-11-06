@@ -1,0 +1,16 @@
+export default {
+  'nav.home': 'Home',
+  'nav.login': 'Login',
+  'nav.register': 'Register',
+  'welcome.title': 'Welcome to the Admin Panel',
+  'welcome.message': 'This is the homepage of your new React application.',
+  'login.username': 'Username',
+  'login.password': 'Password',
+  'login.login': 'Log in',
+  'login.register': 'register now!',
+  'register.username': 'Username',
+  'register.password': 'Password',
+  'register.confirmPassword': 'Confirm Password',
+  'register.register': 'Register',
+  'register.login': 'login now!',
+};
