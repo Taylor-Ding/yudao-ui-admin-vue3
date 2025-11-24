@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import { PropType } from 'vue'
-import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
-import { i18nChangeLanguage, IDomEditor, IEditorConfig } from '@wangeditor/editor'
+import { Editor, Toolbar } from '@wangeditor-next/editor-for-vue'
+import { i18nChangeLanguage, IDomEditor, IEditorConfig } from '@wangeditor-next/editor'
 import { propTypes } from '@/utils/propTypes'
 import { isNumber } from '@/utils/is'
 import { ElMessage } from 'element-plus'
@@ -20,7 +20,7 @@ const currentLocale = computed(() => localeStore.getCurrentLocale)
 i18nChangeLanguage(unref(currentLocale).lang)
 
 const props = defineProps({
-  editorId: propTypes.string.def('wangeEditor-1'),
+  editorId: propTypes.string.def('wangEditor-1'),
   height: propTypes.oneOfType([Number, String]).def('500px'),
   editorConfig: {
     type: Object as PropType<Partial<IEditorConfig>>,
@@ -259,4 +259,4 @@ defineExpose({
   </div>
 </template>
 
-<style src="@wangeditor/editor/dist/css/style.css"></style>
+<style src="@wangeditor-next/editor/dist/css/style.css"></style>
