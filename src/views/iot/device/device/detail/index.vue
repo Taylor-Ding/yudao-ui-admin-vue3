@@ -36,6 +36,18 @@
           @success="getDeviceData"
         />
       </el-tab-pane>
+      <el-tab-pane
+        label="Modbus 配置"
+        name="modbus"
+        v-if="product.codecType === 'ModbusTcp'"
+      >
+        <DeviceModbusConfig
+          v-if="activeTab === 'modbus'"
+          :device="device"
+          :product="product"
+          :thing-model-list="thingModelList"
+        />
+      </el-tab-pane>
     </el-tabs>
   </el-col>
 </template>
@@ -50,6 +62,7 @@ import DeviceDetailsThingModel from './DeviceDetailsThingModel.vue'
 import DeviceDetailsMessage from './DeviceDetailsMessage.vue'
 import DeviceDetailsSimulator from './DeviceDetailsSimulator.vue'
 import DeviceDetailConfig from './DeviceDetailConfig.vue'
+import DeviceModbusConfig from './DeviceModbusConfig.vue'
 
 defineOptions({ name: 'IoTDeviceDetail' })
 

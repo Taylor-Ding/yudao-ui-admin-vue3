@@ -1,0 +1,262 @@
+<!-- Modbus 配置 -->
+<template>
+  <div>
+    <!-- 连接配置区域 -->
+    <ContentWrap>
+      <div class="flex items-center justify-between mb-4">
+        <span class="text-lg font-medium">连接配置</span>
+        <el-button type="primary" @click="handleEditConfig">编辑</el-button>
+      </div>
+
+      <!-- 详情展示 -->
+      <el-descriptions :column="3" border direction="horizontal">
+        <el-descriptions-item label="IP 地址">
+          {{ modbusConfig.ip || '-' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="端口">
+          {{ modbusConfig.port || '-' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="从站地址">
+          {{ modbusConfig.slaveId || '-' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="连接超时">
+          {{ modbusConfig.timeout ? `${modbusConfig.timeout} ms` : '-' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="重试间隔">
+          {{ modbusConfig.retryInterval ? `${modbusConfig.retryInterval} ms` : '-' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="状态">
+          <el-tag :type="modbusConfig.status === 0 ? 'success' : 'danger'">
+            {{ modbusConfig.status === 0 ? '启用' : '禁用' }}
+          </el-tag>
+        </el-descriptions-item>
+      </el-descriptions>
+    </ContentWrap>
+
+    <!-- 点位配置区域 -->
+    <ContentWrap class="mt-4">
+      <div class="flex items-center justify-between mb-4">
+        <span class="text-lg font-medium">点位配置</span>
+        <el-button type="primary" @click="handleAddPoint">
+          <Icon icon="ep:plus" class="mr-1" />
+          新增点位
+        </el-button>
+      </div>
+
+      <!-- 搜索栏 -->
+      <el-form :model="queryParams" :inline="true" class="-mb-15px">
+        <el-form-item label="属性名称" prop="name">
+          <el-input
+            v-model="queryParams.name"
+            placeholder="请输入属性名称"
+            clearable
+            class="!w-200px"
+            @keyup.enter="handleQuery"
+          />
+        </el-form-item>
+        <el-form-item label="标识符" prop="identifier">
+          <el-input
+            v-model="queryParams.identifier"
+            placeholder="请输入标识符"
+            clearable
+            class="!w-200px"
+            @keyup.enter="handleQuery"
+          />
+        </el-form-item>
+        <el-form-item>
+          <el-button @click="handleQuery">
+            <Icon icon="ep:search" class="mr-5px" />
+            搜索
+          </el-button>
+          <el-button @click="resetQuery">
+            <Icon icon="ep:refresh" class="mr-5px" />
+            重置
+          </el-button>
+        </el-form-item>
+      </el-form>
+
+      <!-- 点位列表 -->
+      <el-table v-loading="pointLoading" :data="pointList" :stripe="true" class="mt-4">
+        <el-table-column label="属性名称" align="center" prop="name" min-width="100" />
+        <el-table-column label="标识符" align="center" prop="identifier" min-width="100">
+          <template #default="scope">
+            <el-tag size="small" type="primary">{{ scope.row.identifier }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="功能码" align="center" prop="functionCode" min-width="140">
+          <template #default="scope">
+            {{ formatFunctionCode(scope.row.functionCode) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="寄存器地址" align="center" prop="registerAddress" min-width="100">
+          <template #default="scope">
+            {{ formatRegisterAddress(scope.row.registerAddress) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="寄存器数量" align="center" prop="registerCount" min-width="90" />
+        <el-table-column label="数据类型" align="center" prop="rawDataType" min-width="90">
+          <template #default="scope">
+            <el-tag size="small" type="info">{{ scope.row.rawDataType }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="字节序" align="center" prop="byteOrder" min-width="80" />
+        <el-table-column label="缩放因子" align="center" prop="scale" min-width="80" />
+        <el-table-column label="轮询间隔" align="center" prop="pollInterval" min-width="90">
+          <template #default="scope"> {{ scope.row.pollInterval }} ms </template>
+        </el-table-column>
+        <el-table-column label="状态" align="center" prop="status" min-width="80">
+          <template #default="scope">
+            <!-- TODO @AI dict-tag -->
+            <el-tag :type="scope.row.status === 0 ? 'success' : 'danger'" size="small">
+              {{ scope.row.status === 0 ? '启用' : '禁用' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" align="center" fixed="right" width="120">
+          <template #default="scope">
+            <el-button link type="primary" @click="handleEditPoint(scope.row)">编辑</el-button>
+            <el-button link type="danger" @click="handleDeletePoint(scope.row.id)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <!-- 分页 -->
+      <Pagination
+        :total="total"
+        v-model:page="queryParams.pageNo"
+        v-model:limit="queryParams.pageSize"
+        @pagination="getPointPage"
+      />
+    </ContentWrap>
+
+    <!-- 连接配置弹窗 -->
+    <DeviceModbusConfigForm ref="configFormRef" :device-id="device.id" @success="getModbusConfig" />
+
+    <!-- 点位表单弹窗 -->
+    <DeviceModbusPointForm
+      ref="pointFormRef"
+      :device-id="device.id"
+      :thing-model-list="thingModelList"
+      @success="getPointPage"
+    />
+  </div>
+</template>
+
+<script lang="ts" setup>
+import { DeviceVO } from '@/api/iot/device/device'
+import { ProductVO } from '@/api/iot/product/product'
+import { ThingModelData } from '@/api/iot/thingmodel'
+import { DeviceModbusConfigApi, DeviceModbusConfigVO } from '@/api/iot/device/modbus/config'
+import { DeviceModbusPointApi, DeviceModbusPointVO } from '@/api/iot/device/modbus/point'
+import { ModbusFunctionCodeOptions } from '@/views/iot/utils/constants'
+import DeviceModbusConfigForm from './DeviceModbusConfigForm.vue'
+import DeviceModbusPointForm from './DeviceModbusPointForm.vue'
+
+defineOptions({ name: 'DeviceModbusConfig' })
+
+const props = defineProps<{
+  device: DeviceVO
+  product: ProductVO
+  thingModelList: ThingModelData[]
+}>()
+
+const message = useMessage()
+
+// ======================= 连接配置 =======================
+// TODO @AI：默认应该都是空的
+const modbusConfig = ref<DeviceModbusConfigVO>({
+  deviceId: props.device.id,
+  ip: '',
+  port: 502,
+  slaveId: 1,
+  timeout: 3000,
+  retryInterval: 1000,
+  status: 0 // TODO @AI：使用 CommonStatus；
+})
+
+/** 获取连接配置 */
+const getModbusConfig = async () => {
+  modbusConfig.value = await DeviceModbusConfigApi.getModbusConfig(props.device.id)
+}
+
+/** 编辑连接配置 */
+const configFormRef = ref()
+const handleEditConfig = () => {
+  configFormRef.value?.open(modbusConfig.value)
+}
+
+// ======================= 点位配置 =======================
+const pointLoading = ref(false)
+const pointList = ref<DeviceModbusPointVO[]>([])
+const total = ref(0)
+const queryParams = reactive({
+  pageNo: 1,
+  pageSize: 10,
+  deviceId: props.device.id,
+  name: undefined as string | undefined,
+  identifier: undefined as string | undefined
+})
+
+/** 获取点位分页 */
+const getPointPage = async () => {
+  pointLoading.value = true
+  try {
+    const data = await DeviceModbusPointApi.getModbusPointPage(queryParams)
+    pointList.value = data.list
+    total.value = data.total
+  } finally {
+    pointLoading.value = false
+  }
+}
+
+/** 搜索 */
+const handleQuery = () => {
+  queryParams.pageNo = 1
+  getPointPage()
+}
+
+/** 重置搜索 */
+const resetQuery = () => {
+  queryParams.name = undefined
+  queryParams.identifier = undefined
+  handleQuery()
+}
+
+/** 格式化功能码 */
+const formatFunctionCode = (code: number) => {
+  const option = ModbusFunctionCodeOptions.find((item) => item.value === code)
+  return option ? option.label : `${code}`
+}
+
+/** 格式化寄存器地址为十六进制 */
+const formatRegisterAddress = (address: number) => {
+  return '0x' + address.toString(16).toUpperCase().padStart(4, '0')
+}
+
+/** 新增点位 */
+const pointFormRef = ref()
+const handleAddPoint = () => {
+  pointFormRef.value?.open('create')
+}
+
+/** 编辑点位 */
+const handleEditPoint = (row: DeviceModbusPointVO) => {
+  pointFormRef.value?.open('update', row.id)
+}
+
+/** 删除点位 */
+const handleDeletePoint = async (id: number) => {
+  // TODO @AI：最好点位的名字带上。参考别的模块；
+  // TODO @AI：参考别的注释。
+  await message.confirm('确定要删除该点位配置吗？')
+  await DeviceModbusPointApi.deleteModbusPoint(id)
+  message.success('删除成功')
+  await getPointPage()
+}
+
+/** 初始化 */
+onMounted(async () => {
+  await getModbusConfig()
+  await getPointPage()
+})
+</script>
