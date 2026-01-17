@@ -35,14 +35,18 @@
         </el-select>
       </el-form-item>
       <el-form-item label="寄存器地址" prop="registerAddress">
-        <el-input-number
-          v-model="formData.registerAddress"
+        <el-input
+          v-model.number="formData.registerAddress"
+          type="number"
           :min="0"
           :max="65535"
-          controls-position="right"
           placeholder="请输入寄存器地址"
           class="!w-full"
-        />
+        >
+          <template #suffix>
+            <span class="text-gray-400">{{ registerAddressHex }}</span>
+          </template>
+        </el-input>
       </el-form-item>
       <el-form-item label="寄存器数量" prop="registerCount">
         <el-input-number
@@ -100,11 +104,15 @@
         />
       </el-form-item>
       <el-form-item label="状态" prop="status">
-        <el-switch
-          v-model="formData.status"
-          :active-value="CommonStatusEnum.ENABLE"
-          :inactive-value="CommonStatusEnum.DISABLE"
-        />
+        <el-radio-group v-model="formData.status">
+          <el-radio
+            v-for="dict in getIntDictOptions(DICT_TYPE.COMMON_STATUS)"
+            :key="dict.value"
+            :label="dict.value"
+          >
+            {{ dict.label }}
+          </el-radio>
+        </el-radio-group>
       </el-form-item>
     </el-form>
     <template #footer>
@@ -120,8 +128,10 @@ import { DeviceModbusPointApi, DeviceModbusPointVO } from '@/api/iot/device/modb
 import {
   ModbusFunctionCodeOptions,
   ModbusRawDataTypeOptions,
-  getByteOrderOptions
+  getByteOrderOptions,
+  IoTThingModelTypeEnum
 } from '@/views/iot/utils/constants'
+import { getIntDictOptions, DICT_TYPE } from '@/utils/dict'
 import { CommonStatusEnum } from '@/utils/constants'
 
 defineOptions({ name: 'DeviceModbusPointForm' })
@@ -135,26 +145,27 @@ const emit = defineEmits<{
   (e: 'success'): void
 }>()
 
+const { t } = useI18n()
 const message = useMessage()
-
 const dialogVisible = ref(false) // 弹窗的是否展示
 const dialogTitle = ref('') // 弹窗的标题
 const formLoading = ref(false) // 表单的加载中：1）修改时的数据加载；2）提交的按钮禁用
 const formType = ref('') // 表单的类型：create - 新增；update - 修改
 const formData = ref<DeviceModbusPointVO>({
   deviceId: props.deviceId,
-  thingModelId: 0, // TODO @AI：不要有默认值；
+  thingModelId: undefined,
   identifier: '',
   name: '',
-  functionCode: 3,
-  registerAddress: 0,
-  registerCount: 1,
-  byteOrder: 'AB',
-  rawDataType: 'INT16',
+  functionCode: undefined,
+  registerAddress: undefined,
+  registerCount: undefined,
+  byteOrder: undefined,
+  rawDataType: undefined,
   scale: 1,
   pollInterval: 5000,
   status: CommonStatusEnum.ENABLE
-}) // TODO @AI：registerAddress、registerAddress、registerCount、rawDataType 不要有默认值；
+})
+
 const formRules = {
   thingModelId: [{ required: true, message: '请选择物模型属性', trigger: 'change' }],
   functionCode: [{ required: true, message: '请选择功能码', trigger: 'change' }],
@@ -165,14 +176,24 @@ const formRules = {
 }
 const formRef = ref() // 表单 Ref
 
+/** 寄存器地址十六进制显示 */
+const registerAddressHex = computed(() => {
+  if (formData.value.registerAddress === undefined || formData.value.registerAddress === null) {
+    return ''
+  }
+  return '0x' + formData.value.registerAddress.toString(16).toUpperCase().padStart(4, '0')
+})
+
 /** 筛选属性类型的物模型 */
 const propertyList = computed(() => {
-  // TODO @AI：1 使用枚举代替魔法数字
-  return props.thingModelList.filter((item) => item.type === 1)
+  return props.thingModelList.filter((item) => item.type === IoTThingModelTypeEnum.PROPERTY)
 })
 
 /** 当前字节序选项（根据数据类型动态变化） */
 const currentByteOrderOptions = computed(() => {
+  if (!formData.value.rawDataType) {
+    return []
+  }
   return getByteOrderOptions(formData.value.rawDataType)
 })
 
@@ -204,8 +225,7 @@ const handleRawDataTypeChange = (rawDataType: string) => {
 const open = async (type: 'create' | 'update', id?: number) => {
   dialogVisible.value = true
   formType.value = type
-  // TODO @AI：dialogTitle.value = t('action.' + type)
-  dialogTitle.value = type === 'create' ? '新增 Modbus 点位' : '编辑 Modbus 点位'
+  dialogTitle.value = t('action.' + type)
   resetForm()
   // 修改时，设置数据
   if (type === 'update' && id) {
@@ -246,15 +266,14 @@ const submitForm = async () => {
 const resetForm = () => {
   formData.value = {
     deviceId: props.deviceId,
-    thingModelId: 0,
+    thingModelId: undefined,
     identifier: '',
     name: '',
-    // TODO @AI：3、0、1、AB/INT16 使用枚举；
-    functionCode: 3,
-    registerAddress: 0,
-    registerCount: 1,
-    byteOrder: 'AB',
-    rawDataType: 'INT16',
+    functionCode: undefined,
+    registerAddress: undefined,
+    registerCount: undefined,
+    byteOrder: undefined,
+    rawDataType: undefined,
     scale: 1,
     pollInterval: 5000,
     status: CommonStatusEnum.ENABLE

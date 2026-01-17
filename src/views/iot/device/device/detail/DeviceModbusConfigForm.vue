@@ -1,6 +1,6 @@
 <!-- Modbus 连接配置弹窗 -->
 <template>
-  <Dialog :title="dialogTitle" v-model="dialogVisible" width="600px">
+  <Dialog title="编辑 Modbus 连接配置" v-model="dialogVisible" width="600px">
     <el-form
       ref="formRef"
       :model="formData"
@@ -52,12 +52,15 @@
         />
       </el-form-item>
       <el-form-item label="状态" prop="status">
-        <!-- TODO @AI：参考别的模块，不要使用这个 -->
-        <el-switch
-          v-model="formData.status"
-          :active-value="CommonStatusEnum.ENABLE"
-          :inactive-value="CommonStatusEnum.DISABLE"
-        />
+        <el-radio-group v-model="formData.status">
+          <el-radio
+            v-for="dict in getIntDictOptions(DICT_TYPE.COMMON_STATUS)"
+            :key="dict.value"
+            :label="dict.value"
+          >
+            {{ dict.label }}
+          </el-radio>
+        </el-radio-group>
       </el-form-item>
     </el-form>
     <template #footer>
@@ -69,6 +72,7 @@
 
 <script lang="ts" setup>
 import { DeviceModbusConfigApi, DeviceModbusConfigVO } from '@/api/iot/device/modbus/config'
+import { getIntDictOptions, DICT_TYPE } from '@/utils/dict'
 import { CommonStatusEnum } from '@/utils/constants'
 
 defineOptions({ name: 'DeviceModbusConfigForm' })
@@ -82,12 +86,8 @@ const emit = defineEmits<{
 }>()
 
 const message = useMessage()
-
-const dialogVisible = ref(false)
-const dialogTitle = ref('编辑 Modbus 连接配置')
-const formLoading = ref(false)
-const formRef = ref()
-
+const dialogVisible = ref(false) // 弹窗的是否展示
+const formLoading = ref(false) // 表单提交 loading 状态
 const formData = ref<DeviceModbusConfigVO>({
   deviceId: props.deviceId,
   ip: '',
@@ -97,8 +97,6 @@ const formData = ref<DeviceModbusConfigVO>({
   retryInterval: 10000,
   status: CommonStatusEnum.ENABLE
 })
-
-/** 表单校验规则 */
 const formRules = {
   ip: [{ required: true, message: '请输入 IP 地址', trigger: 'blur' }],
   port: [{ required: true, message: '请输入端口', trigger: 'blur' }],
@@ -106,6 +104,7 @@ const formRules = {
   timeout: [{ required: true, message: '请输入连接超时时间', trigger: 'blur' }],
   retryInterval: [{ required: true, message: '请输入重试间隔', trigger: 'blur' }]
 }
+const formRef = ref() // 表单 Ref
 
 /** 打开弹窗 */
 const open = async (data?: DeviceModbusConfigVO) => {

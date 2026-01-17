@@ -4,14 +4,14 @@ import request from '@/config/axios'
 export interface DeviceModbusPointVO {
   id?: number // 主键
   deviceId: number // 设备编号
-  thingModelId: number // 物模型属性编号
+  thingModelId?: number // 物模型属性编号
   identifier: string // 属性标识符
   name: string // 属性名称
-  functionCode: number // Modbus 功能码
-  registerAddress: number // 寄存器起始地址
-  registerCount: number // 寄存器数量
-  byteOrder: string // 字节序
-  rawDataType: string // 原始数据类型
+  functionCode?: number // Modbus 功能码
+  registerAddress?: number // 寄存器起始地址
+  registerCount?: number // 寄存器数量
+  byteOrder?: string // 字节序
+  rawDataType?: string // 原始数据类型
   scale: number // 缩放因子
   pollInterval: number // 轮询间隔，单位：毫秒
   status: number // 状态

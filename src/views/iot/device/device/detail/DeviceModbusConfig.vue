@@ -5,7 +5,9 @@
     <ContentWrap>
       <div class="flex items-center justify-between mb-4">
         <span class="text-lg font-medium">连接配置</span>
-        <el-button type="primary" @click="handleEditConfig">编辑</el-button>
+        <el-button type="primary" @click="handleEditConfig" v-hasPermi="['iot:device:create']">
+          编辑
+        </el-button>
       </div>
 
       <!-- 详情展示 -->
@@ -26,9 +28,7 @@
           {{ modbusConfig.retryInterval ? `${modbusConfig.retryInterval} ms` : '-' }}
         </el-descriptions-item>
         <el-descriptions-item label="状态">
-          <el-tag :type="modbusConfig.status === 0 ? 'success' : 'danger'">
-            {{ modbusConfig.status === 0 ? '启用' : '禁用' }}
-          </el-tag>
+          <dict-tag :type="DICT_TYPE.COMMON_STATUS" :value="modbusConfig.status" />
         </el-descriptions-item>
       </el-descriptions>
     </ContentWrap>
@@ -37,9 +37,8 @@
     <ContentWrap class="mt-4">
       <div class="flex items-center justify-between mb-4">
         <span class="text-lg font-medium">点位配置</span>
-        <el-button type="primary" @click="handleAddPoint">
+        <el-button type="primary" @click="handleAddPoint" v-hasPermi="['iot:device:create']">
           <Icon icon="ep:plus" class="mr-1" />
-          <!-- TODO @AI：权限，需要和后端接口对齐 -->
           新增点位
         </el-button>
       </div>
@@ -112,9 +111,20 @@
         </el-table-column>
         <el-table-column label="操作" align="center" fixed="right" width="120">
           <template #default="scope">
-            <!-- TODO @AI：权限，需要和后端接口对齐 -->
-            <el-button link type="primary" @click="handleEditPoint(scope.row)">编辑</el-button>
-            <el-button link type="danger" @click="handleDeletePoint(scope.row.id, scope.row.name)">
+            <el-button
+              link
+              type="primary"
+              @click="handleEditPoint(scope.row)"
+              v-hasPermi="['iot:device:update']"
+            >
+              编辑
+            </el-button>
+            <el-button
+              link
+              type="danger"
+              @click="handleDeletePoint(scope.row.id, scope.row.name)"
+              v-hasPermi="['iot:device:delete']"
+            >
               删除
             </el-button>
           </template>
