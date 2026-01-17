@@ -39,6 +39,7 @@
         <span class="text-lg font-medium">点位配置</span>
         <el-button type="primary" @click="handleAddPoint">
           <Icon icon="ep:plus" class="mr-1" />
+          <!-- TODO @AI：权限，需要和后端接口对齐 -->
           新增点位
         </el-button>
       </div>
@@ -106,16 +107,16 @@
         </el-table-column>
         <el-table-column label="状态" align="center" prop="status" min-width="80">
           <template #default="scope">
-            <!-- TODO @AI dict-tag -->
-            <el-tag :type="scope.row.status === 0 ? 'success' : 'danger'" size="small">
-              {{ scope.row.status === 0 ? '启用' : '禁用' }}
-            </el-tag>
+            <dict-tag :type="DICT_TYPE.COMMON_STATUS" :value="scope.row.status" />
           </template>
         </el-table-column>
         <el-table-column label="操作" align="center" fixed="right" width="120">
           <template #default="scope">
+            <!-- TODO @AI：权限，需要和后端接口对齐 -->
             <el-button link type="primary" @click="handleEditPoint(scope.row)">编辑</el-button>
-            <el-button link type="danger" @click="handleDeletePoint(scope.row.id)">删除</el-button>
+            <el-button link type="danger" @click="handleDeletePoint(scope.row.id, scope.row.name)">
+              删除
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -149,6 +150,7 @@ import { ThingModelData } from '@/api/iot/thingmodel'
 import { DeviceModbusConfigApi, DeviceModbusConfigVO } from '@/api/iot/device/modbus/config'
 import { DeviceModbusPointApi, DeviceModbusPointVO } from '@/api/iot/device/modbus/point'
 import { ModbusFunctionCodeOptions } from '@/views/iot/utils/constants'
+import { DICT_TYPE } from '@/utils/dict'
 import DeviceModbusConfigForm from './DeviceModbusConfigForm.vue'
 import DeviceModbusPointForm from './DeviceModbusPointForm.vue'
 
@@ -163,16 +165,7 @@ const props = defineProps<{
 const message = useMessage()
 
 // ======================= 连接配置 =======================
-// TODO @AI：默认应该都是空的
-const modbusConfig = ref<DeviceModbusConfigVO>({
-  deviceId: props.device.id,
-  ip: '',
-  port: 502,
-  slaveId: 1,
-  timeout: 3000,
-  retryInterval: 1000,
-  status: 0 // TODO @AI：使用 CommonStatus；
-})
+const modbusConfig = ref<DeviceModbusConfigVO>({} as DeviceModbusConfigVO)
 
 /** 获取连接配置 */
 const getModbusConfig = async () => {
@@ -245,13 +238,16 @@ const handleEditPoint = (row: DeviceModbusPointVO) => {
 }
 
 /** 删除点位 */
-const handleDeletePoint = async (id: number) => {
-  // TODO @AI：最好点位的名字带上。参考别的模块；
-  // TODO @AI：参考别的注释。
-  await message.confirm('确定要删除该点位配置吗？')
-  await DeviceModbusPointApi.deleteModbusPoint(id)
-  message.success('删除成功')
-  await getPointPage()
+const handleDeletePoint = async (id: number, name: string) => {
+  try {
+    // 删除的二次确认
+    await message.delConfirm('确定要删除点位【' + name + '】吗？')
+    // 发起删除
+    await DeviceModbusPointApi.deleteModbusPoint(id)
+    message.success('删除成功')
+    // 刷新列表
+    await getPointPage()
+  } catch {}
 }
 
 /** 初始化 */
