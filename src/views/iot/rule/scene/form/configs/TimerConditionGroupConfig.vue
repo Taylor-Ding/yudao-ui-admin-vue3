@@ -15,9 +15,7 @@
           <span>附加条件组</span>
         </div>
         <el-tag size="small" type="info">定时触发时需满足以下条件</el-tag>
-        <el-tag size="small" type="warning">
-          {{ conditionGroups?.length || 0 }} 个子条件组
-        </el-tag>
+        <el-tag size="small" type="warning"> {{ conditionGroups?.length || 0 }} 个子条件组 </el-tag>
       </div>
       <el-button
         type="primary"
@@ -138,12 +136,10 @@ const addConditionGroup = async () => {
   if (!conditionGroups.value) {
     conditionGroups.value = []
   }
-
   // 检查是否达到最大条件组数量限制
   if (conditionGroups.value.length >= maxGroups) {
     return
   }
-
   // 使用 nextTick 确保响应式更新完成后再添加新的条件组
   await nextTick()
   if (conditionGroups.value) {
@@ -151,21 +147,14 @@ const addConditionGroup = async () => {
   }
 }
 
-/**
- * 移除条件组
- * @param index 条件组索引
- */
+/** 移除条件组 */
 const removeConditionGroup = (index: number) => {
   if (conditionGroups.value) {
     conditionGroups.value.splice(index, 1)
   }
 }
 
-/**
- * 更新条件组
- * @param index 条件组索引
- * @param group 条件组数据
- */
+/** 更新条件组 */
 const updateConditionGroup = (index: number, group: TriggerCondition[]) => {
   if (conditionGroups.value) {
     conditionGroups.value[index] = group

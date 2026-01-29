@@ -219,13 +219,13 @@ const thingModelTSL = ref<IotThingModelTSLResp | null>(null) // 物模型TSL数�
 const propertyGroups = computed(() => {
   const groups: { label: string; options: any[] }[] = []
 
-  // 设备属性上报触发器 或 定时触发器（条件组中的设备属性条件）
+  // 设备属性上报触发器、定时触发器（条件组中的设备属性条件）
   if (
     props.triggerType === IotRuleSceneTriggerTypeEnum.DEVICE_PROPERTY_POST ||
     props.triggerType === IotRuleSceneTriggerTypeEnum.TIMER
   ) {
     const propertyOptions = propertyList.value.filter(
-      (p) => p.type === IoTThingModelTypeEnum.PROPERTY
+      (property) => property.type === IoTThingModelTypeEnum.PROPERTY
     )
     if (propertyOptions.length > 0) {
       groups.push({
