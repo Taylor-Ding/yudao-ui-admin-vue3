@@ -17,7 +17,13 @@
           :thing-model-list="thingModelList"
         />
       </el-tab-pane>
-      <el-tab-pane label="子设备管理" v-if="product.deviceType === DeviceTypeEnum.GATEWAY" />
+      <el-tab-pane
+        label="子设备管理"
+        name="subDevice"
+        v-if="product.deviceType === DeviceTypeEnum.GATEWAY"
+      >
+        <DeviceDetailsSubDevice v-if="activeTab === 'subDevice'" :gateway-id="device.id" />
+      </el-tab-pane>
       <el-tab-pane label="设备消息" name="log">
         <DeviceDetailsMessage v-if="activeTab === 'log'" :device-id="device.id" />
       </el-tab-pane>
@@ -63,6 +69,7 @@ import DeviceDetailsMessage from './DeviceDetailsMessage.vue'
 import DeviceDetailsSimulator from './DeviceDetailsSimulator.vue'
 import DeviceDetailConfig from './DeviceDetailConfig.vue'
 import DeviceModbusConfig from './DeviceModbusConfig.vue'
+import DeviceDetailsSubDevice from './DeviceDetailsSubDevice.vue'
 
 defineOptions({ name: 'IoTDeviceDetail' })
 

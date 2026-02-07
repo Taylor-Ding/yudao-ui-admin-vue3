@@ -15,6 +15,7 @@ import errorCode from './errorCode'
 
 import { resetRouter } from '@/router'
 import { deleteUserCache } from '@/hooks/web/useCache'
+import { ApiEncrypt } from '@/utils/encrypt'
 
 const tenantEnable = import.meta.env.VITE_APP_TENANT_ENABLE
 const { result_code, base_url, request_timeout } = config
@@ -83,6 +84,20 @@ service.interceptors.request.use(
         }
       }
     }
+    // 是否 API 加密
+    if ((config!.headers || {}).isEncrypt && !(config!.headers || {}).isEncrypted) {
+      try {
+        // 加密请求数据
+        if (config.data) {
+          config.data = ApiEncrypt.encryptRequest(config.data)
+          // 设置加密标识头
+          config.headers[ApiEncrypt.getEncryptHeader()] = 'true'
+        }
+      } catch (error) {
+        console.error('请求数据加密失败:', error)
+        throw error
+      }
+    }
     return config
   },
   (error: AxiosError) => {
@@ -101,6 +116,22 @@ service.interceptors.response.use(
       // 返回“[HTTP]请求没有返回值”;
       throw new Error()
     }
+
+    // 检查是否需要解密响应数据
+    const encryptHeader = ApiEncrypt.getEncryptHeader()
+    const isEncryptResponse =
+      response.headers[encryptHeader] === 'true' ||
+      response.headers[encryptHeader.toLowerCase()] === 'true'
+    if (isEncryptResponse && typeof data === 'string') {
+      try {
+        // 解密响应数据
+        data = ApiEncrypt.decryptResponse(data)
+      } catch (error) {
+        console.error('响应数据解密失败:', error)
+        throw new Error('响应数据解密失败: ' + (error as Error).message)
+      }
+    }
+
     const { t } = useI18n()
     // 未设置状态码则默认成功状态
     // 二进制数据则直接返回，例如说 Excel 导出
@@ -138,6 +169,9 @@ service.interceptors.response.use(
             cb()
           })
           requestList = []
+          if ((config!.headers || {}).isEncrypt){
+            (config!.headers || {}).isEncrypted = true
+          }
           return service(config)
         } catch (e) {
           // 为什么需要 catch 异常呢？刷新失败时，请求因为 Promise.reject 触发异常。
