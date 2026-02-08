@@ -12,21 +12,38 @@
 
       <!-- 详情展示 -->
       <el-descriptions :column="3" border direction="horizontal">
-        <el-descriptions-item label="IP 地址">
-          {{ modbusConfig.ip || '-' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="端口">
-          {{ modbusConfig.port || '-' }}
-        </el-descriptions-item>
+        <!-- Master 模式专有字段 -->
+        <template v-if="isMaster">
+          <el-descriptions-item label="IP 地址">
+            {{ modbusConfig.ip || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="端口">
+            {{ modbusConfig.port || '-' }}
+          </el-descriptions-item>
+        </template>
+        <!-- 公共字段 -->
         <el-descriptions-item label="从站地址">
           {{ modbusConfig.slaveId || '-' }}
         </el-descriptions-item>
-        <el-descriptions-item label="连接超时">
-          {{ modbusConfig.timeout ? `${modbusConfig.timeout} ms` : '-' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="重试间隔">
-          {{ modbusConfig.retryInterval ? `${modbusConfig.retryInterval} ms` : '-' }}
-        </el-descriptions-item>
+        <!-- Master 模式专有字段 -->
+        <template v-if="isMaster">
+          <el-descriptions-item label="连接超时">
+            {{ modbusConfig.timeout ? `${modbusConfig.timeout} ms` : '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="重试间隔">
+            {{ modbusConfig.retryInterval ? `${modbusConfig.retryInterval} ms` : '-' }}
+          </el-descriptions-item>
+        </template>
+        <!-- Slave 模式专有字段 -->
+        <template v-if="isSlave">
+          <el-descriptions-item label="工作模式">
+            <dict-tag :type="DICT_TYPE.IOT_MODBUS_MODE" :value="modbusConfig.mode" />
+          </el-descriptions-item>
+          <el-descriptions-item label="帧格式">
+            <dict-tag :type="DICT_TYPE.IOT_MODBUS_FRAME_FORMAT" :value="modbusConfig.frameFormat" />
+          </el-descriptions-item>
+        </template>
+        <!-- 公共字段 -->
         <el-descriptions-item label="状态">
           <dict-tag :type="DICT_TYPE.COMMON_STATUS" :value="modbusConfig.status" />
         </el-descriptions-item>
@@ -141,7 +158,12 @@
     </ContentWrap>
 
     <!-- 连接配置弹窗 -->
-    <DeviceModbusConfigForm ref="configFormRef" :device-id="device.id" @success="getModbusConfig" />
+    <DeviceModbusConfigForm
+      ref="configFormRef"
+      :device-id="device.id"
+      :protocol-type="product.protocolType"
+      @success="getModbusConfig"
+    />
 
     <!-- 点位表单弹窗 -->
     <DeviceModbusPointForm
@@ -155,7 +177,7 @@
 
 <script lang="ts" setup>
 import { DeviceVO } from '@/api/iot/device/device'
-import { ProductVO } from '@/api/iot/product/product'
+import { ProductVO, ProtocolTypeEnum } from '@/api/iot/product/product'
 import { ThingModelData } from '@/api/iot/thingmodel'
 import { DeviceModbusConfigApi, DeviceModbusConfigVO } from '@/api/iot/device/modbus/config'
 import { DeviceModbusPointApi, DeviceModbusPointVO } from '@/api/iot/device/modbus/point'
@@ -175,6 +197,8 @@ const props = defineProps<{
 const message = useMessage()
 
 // ======================= 连接配置 =======================
+const isMaster = computed(() => props.product.protocolType === ProtocolTypeEnum.MODBUS_TCP_MASTER) // 是否为 Master 模式
+const isSlave = computed(() => props.product.protocolType === ProtocolTypeEnum.MODBUS_TCP_SLAVE) // 是否为 Slave 模式
 const modbusConfig = ref<DeviceModbusConfigVO>({} as DeviceModbusConfigVO)
 
 /** 获取连接配置 */

@@ -45,7 +45,11 @@
       <el-tab-pane
         label="Modbus 配置"
         name="modbus"
-        v-if="product.codecType === 'ModbusTcp'"
+        v-if="
+          [ProtocolTypeEnum.MODBUS_TCP_MASTER, ProtocolTypeEnum.MODBUS_TCP_SLAVE].includes(
+            product.protocolType as ProtocolTypeEnum
+          )
+        "
       >
         <DeviceModbusConfig
           v-if="activeTab === 'modbus'"
@@ -60,7 +64,7 @@
 <script lang="ts" setup>
 import { useTagsViewStore } from '@/store/modules/tagsView'
 import { DeviceApi, DeviceVO } from '@/api/iot/device/device'
-import { DeviceTypeEnum, ProductApi, ProductVO } from '@/api/iot/product/product'
+import { DeviceTypeEnum, ProductApi, ProductVO, ProtocolTypeEnum } from '@/api/iot/product/product'
 import { ThingModelApi, ThingModelData } from '@/api/iot/thingmodel'
 import DeviceDetailsHeader from './DeviceDetailsHeader.vue'
 import DeviceDetailsInfo from './DeviceDetailsInfo.vue'

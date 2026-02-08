@@ -9,6 +9,8 @@ export interface DeviceModbusConfigVO {
   slaveId: number // 从站地址
   timeout: number // 连接超时时间，单位：毫秒
   retryInterval: number // 重试间隔，单位：毫秒
+  mode: number // 模式
+  frameFormat: number // 帧格式
   status: number // 状态
 }
 

@@ -600,7 +600,19 @@ export const JSON_PARAMS_EXAMPLE_VALUES = {
   DEFAULT: { display: '""', value: '' }
 } as const
 
-// ========== Modbus 相关常量 ==========
+// ========== Modbus 通用常量 ==========
+
+/** Modbus 模式枚举 */
+export const ModbusModeEnum = {
+  POLLING: 1, // 云端轮询
+  ACTIVE_REPORT: 2 // 主动上报
+} as const
+
+/** Modbus 帧格式枚举 */
+export const ModbusFrameFormatEnum = {
+  MODBUS_TCP: 1, // Modbus TCP
+  MODBUS_RTU: 2 // Modbus RTU
+} as const
 
 /** Modbus 功能码枚举 */
 export const ModbusFunctionCodeEnum = {
@@ -614,8 +626,8 @@ export const ModbusFunctionCodeEnum = {
 export const ModbusFunctionCodeOptions = [
   { value: 1, label: '01 - 读线圈 (Coils)', description: '可读写布尔值' },
   { value: 2, label: '02 - 读离散输入 (Discrete Inputs)', description: '只读布尔值' },
-  { value: 3, label: '03 - 读保持寄存器 (Holding Registers)', description: '可读写16位数据' },
-  { value: 4, label: '04 - 读输入寄存器 (Input Registers)', description: '只读16位数据' }
+  { value: 3, label: '03 - 读保持寄存器 (Holding Registers)', description: '可读写 16 位数据' },
+  { value: 4, label: '04 - 读输入寄存器 (Input Registers)', description: '只读 16 位数据' }
 ]
 
 /** Modbus 原始数据类型枚举 */
@@ -662,7 +674,7 @@ export const getByteOrderOptions = (rawDataType: string) => {
     return ModbusByteOrder32Options
   }
   if (rawDataType === 'DOUBLE') {
-    // 64位暂时复用32位字节序
+    // 64 位暂时复用 32 位字节序
     return ModbusByteOrder32Options
   }
   return ModbusByteOrder16Options
