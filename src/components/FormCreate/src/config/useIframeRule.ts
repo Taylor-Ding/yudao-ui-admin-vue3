@@ -7,7 +7,6 @@ import { localeProps, makeRequiredRule } from '@/components/FormCreate/src/utils
 export const useIframeRule = () => {
   const label = '网页 iframe'
   const name = 'IframeComponent'
-
   return {
     icon: 'icon-link',
     label,

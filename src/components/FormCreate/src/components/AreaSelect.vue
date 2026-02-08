@@ -18,6 +18,7 @@
 <script lang="ts" setup>
 import { onMounted, ref, watch } from 'vue'
 import { getAreaTree } from '@/api/system/area'
+// TODO @puhui999：这里 handleTree 貌似没用到
 import { handleTree } from '@/utils/tree'
 
 defineOptions({ name: 'AreaSelect' })
@@ -34,7 +35,7 @@ interface AreaVO {
 
 interface Props {
   modelValue?: number[] | string[]
-  level?: 1 | 2 | 3 // 1-省 2-市 3-区
+  level?: 1 | 2 | 3 // 1-省 2-市 3-区 TODO @puhui999：这里是不是放到枚举类里？
   disabled?: boolean
   placeholder?: string
   clearable?: boolean
@@ -45,7 +46,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   modelValue: undefined,
-  level: 3,
+  level: 3, // TODO @puhui999：枚举类；
   disabled: false,
   placeholder: '请选择省市区',
   clearable: true,
@@ -57,28 +58,23 @@ const emit = defineEmits<{
   (e: 'update:modelValue', value: number[] | string[] | undefined): void
 }>()
 
-// Element Plus Cascader 的 props 配置
 const cascaderProps = {
   label: 'name',
   value: 'id',
   children: 'children',
   checkStrictly: true, // 允许选择任意级别
   emitPath: true // 返回完整路径
-}
+} // Element Plus Cascader 的 props 配置
 
-// 地区树形数据
-const areaTree = ref<AreaVO[]>([])
-// 当前选中值
-const selectedValue = ref<number[] | undefined>()
-// 加载状态
-const loading = ref(false)
+const areaTree = ref<AreaVO[]>([]) // 地区树形数据
+const selectedValue = ref<number[] | undefined>() // 当前选中值
+const loading = ref(false) // 加载状态
 
-// 加载地区树形数据
+/** 加载地区树形数据 */
 async function loadAreaTree(): Promise<void> {
   try {
     loading.value = true
     const data = await getAreaTree()
-
     // 根据 level 限制层级
     areaTree.value = filterTreeByLevel(data || [], props.level)
   } catch (error) {
@@ -89,13 +85,13 @@ async function loadAreaTree(): Promise<void> {
   }
 }
 
-// 根据层级过滤树形数据
+/** 根据层级过滤树形数据 */
 function filterTreeByLevel(tree: AreaVO[], maxLevel: number): AreaVO[] {
-  if (maxLevel <= 0) return []
-
+  if (maxLevel <= 0) {
+    return []
+  }
   return tree.map((node) => {
     const newNode = { ...node }
-
     // 如果当前是最后一层，移除 children
     if (maxLevel === 1) {
       delete newNode.children
@@ -103,25 +99,22 @@ function filterTreeByLevel(tree: AreaVO[], maxLevel: number): AreaVO[] {
       // 递归处理子节点
       newNode.children = filterTreeByLevel(node.children, maxLevel - 1)
     }
-
     return newNode
   })
 }
 
-// 处理选中值变化
+/** 处理选中值变化 */
 function handleChange(value: number[] | undefined): void {
   if (value === undefined || value === null) {
     emit('update:modelValue', undefined)
     return
   }
-
   emit('update:modelValue', value)
 }
 
-// 同步 modelValue 到内部选中值
+/** 同步 modelValue 到内部选中值 */
 function syncSelectedValue(): void {
   const newValue = props.modelValue
-
   if (newValue === undefined || newValue === null) {
     selectedValue.value = undefined
     return
@@ -135,10 +128,10 @@ function syncSelectedValue(): void {
   }
 }
 
-// 监听 modelValue 变化
+/** 监听 modelValue 变化 */
 watch(() => props.modelValue, syncSelectedValue, { immediate: true })
 
-// 组件挂载时加载数据
+/** 组件挂载时加载数据 */
 onMounted(async () => {
   await loadAreaTree()
 })

@@ -7,7 +7,6 @@ import { localeProps, makeRequiredRule } from '@/components/FormCreate/src/utils
 export const useAreaSelectRule = () => {
   const label = '省市区选择器'
   const name = 'AreaSelect'
-
   return {
     icon: 'icon-location',
     label,
