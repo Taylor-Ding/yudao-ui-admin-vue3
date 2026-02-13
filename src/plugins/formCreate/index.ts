@@ -68,18 +68,15 @@ import { UploadFile, UploadImg, UploadImgs } from '@/components/UploadFile'
 import { useApiSelect } from '@/components/FormCreate'
 import { Editor } from '@/components/Editor'
 import DictSelect from '@/components/FormCreate/src/components/DictSelect.vue'
+import DeptSelect from '@/components/FormCreate/src/components/DeptSelect.vue'
+import IframeComponent from '@/components/FormCreate/src/components/IframeComponent.vue'
+import AreaSelect from '@/components/FormCreate/src/components/AreaSelect.vue'
 
 const UserSelect = useApiSelect({
   name: 'UserSelect',
   labelField: 'nickname',
   valueField: 'id',
   url: '/system/user/simple-list'
-})
-const DeptSelect = useApiSelect({
-  name: 'DeptSelect',
-  labelField: 'name',
-  valueField: 'id',
-  url: '/system/dept/simple-list'
 })
 const ApiSelect = useApiSelect({
   name: 'ApiSelect'
@@ -119,6 +116,8 @@ const components = [
   DeptSelect,
   ApiSelect,
   Editor,
+  IframeComponent,
+  AreaSelect,
   ElCollapse,
   ElCollapseItem,
   ElCard
