@@ -46,7 +46,7 @@
         label="Modbus 配置"
         name="modbus"
         v-if="
-          [ProtocolTypeEnum.MODBUS_TCP_MASTER, ProtocolTypeEnum.MODBUS_TCP_SLAVE].includes(
+          [ProtocolTypeEnum.MODBUS_TCP_CLIENT, ProtocolTypeEnum.MODBUS_TCP_SERVER].includes(
             product.protocolType as ProtocolTypeEnum
           )
         "

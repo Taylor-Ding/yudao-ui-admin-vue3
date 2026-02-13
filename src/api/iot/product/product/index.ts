@@ -37,8 +37,8 @@ export enum ProtocolTypeEnum {
   MQTT = 'mqtt',
   EMQX = 'emqx',
   COAP = 'coap',
-  MODBUS_TCP_MASTER = 'modbus_tcp_master',
-  MODBUS_TCP_SLAVE = 'modbus_tcp_slave'
+  MODBUS_TCP_CLIENT = 'modbus_tcp_client',
+  MODBUS_TCP_SERVER = 'modbus_tcp_server'
 }
 
 // IoT 序列化类型枚举

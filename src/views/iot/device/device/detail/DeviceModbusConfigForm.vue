@@ -8,8 +8,8 @@
       label-width="120px"
       v-loading="formLoading"
     >
-      <!-- Master 模式专有字段：IP、端口、超时、重试 -->
-      <template v-if="isMaster">
+      <!-- Client 模式专有字段：IP、端口、超时、重试 -->
+      <template v-if="isClient">
         <el-form-item label="IP 地址" prop="ip">
           <el-input v-model="formData.ip" placeholder="请输入 Modbus 服务器 IP 地址" />
         </el-form-item>
@@ -35,8 +35,8 @@
           class="!w-full"
         />
       </el-form-item>
-      <!-- Master 模式专有字段：超时、重试 -->
-      <template v-if="isMaster">
+      <!-- Client 模式专有字段：超时、重试 -->
+      <template v-if="isClient">
         <el-form-item label="连接超时(ms)" prop="timeout">
           <el-input-number
             v-model="formData.timeout"
@@ -58,8 +58,8 @@
           />
         </el-form-item>
       </template>
-      <!-- Slave 模式专有字段：模式、帧格式 -->
-      <template v-if="isSlave">
+      <!-- Server 模式专有字段：模式、帧格式 -->
+      <template v-if="isServer">
         <el-form-item label="工作模式" prop="mode">
           <el-radio-group v-model="formData.mode">
             <el-radio
@@ -124,8 +124,8 @@ const emit = defineEmits<{
 const message = useMessage()
 const dialogVisible = ref(false) // 弹窗的是否展示
 const formLoading = ref(false) // 表单提交 loading 状态
-const isMaster = computed(() => props.protocolType === ProtocolTypeEnum.MODBUS_TCP_MASTER) // 是否为 Master 模式
-const isSlave = computed(() => props.protocolType === ProtocolTypeEnum.MODBUS_TCP_SLAVE) // 是否为 Slave 模式
+const isClient = computed(() => props.protocolType === ProtocolTypeEnum.MODBUS_TCP_CLIENT) // 是否为 Client 模式
+const isServer = computed(() => props.protocolType === ProtocolTypeEnum.MODBUS_TCP_SERVER) // 是否为 Server 模式
 const formData = ref<DeviceModbusConfigVO>({
   deviceId: props.deviceId,
   ip: '',
@@ -141,13 +141,13 @@ const formRules = computed(() => {
   const rules: Record<string, any[]> = {
     slaveId: [{ required: true, message: '请输入从站地址', trigger: 'blur' }]
   }
-  if (isMaster.value) {
+  if (isClient.value) {
     rules.ip = [{ required: true, message: '请输入 IP 地址', trigger: 'blur' }]
     rules.port = [{ required: true, message: '请输入端口', trigger: 'blur' }]
     rules.timeout = [{ required: true, message: '请输入连接超时时间', trigger: 'blur' }]
     rules.retryInterval = [{ required: true, message: '请输入重试间隔', trigger: 'blur' }]
   }
-  if (isSlave.value) {
+  if (isServer.value) {
     rules.mode = [{ required: true, message: '请选择工作模式', trigger: 'change' }]
     rules.frameFormat = [{ required: true, message: '请选择帧格式', trigger: 'change' }]
   }

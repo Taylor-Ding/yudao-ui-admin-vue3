@@ -12,8 +12,8 @@
 
       <!-- 详情展示 -->
       <el-descriptions :column="3" border direction="horizontal">
-        <!-- Master 模式专有字段 -->
-        <template v-if="isMaster">
+        <!-- Client 模式专有字段 -->
+        <template v-if="isClient">
           <el-descriptions-item label="IP 地址">
             {{ modbusConfig.ip || '-' }}
           </el-descriptions-item>
@@ -25,8 +25,8 @@
         <el-descriptions-item label="从站地址">
           {{ modbusConfig.slaveId || '-' }}
         </el-descriptions-item>
-        <!-- Master 模式专有字段 -->
-        <template v-if="isMaster">
+        <!-- Client 模式专有字段 -->
+        <template v-if="isClient">
           <el-descriptions-item label="连接超时">
             {{ modbusConfig.timeout ? `${modbusConfig.timeout} ms` : '-' }}
           </el-descriptions-item>
@@ -34,8 +34,8 @@
             {{ modbusConfig.retryInterval ? `${modbusConfig.retryInterval} ms` : '-' }}
           </el-descriptions-item>
         </template>
-        <!-- Slave 模式专有字段 -->
-        <template v-if="isSlave">
+        <!-- Server 模式专有字段 -->
+        <template v-if="isServer">
           <el-descriptions-item label="工作模式">
             <dict-tag :type="DICT_TYPE.IOT_MODBUS_MODE" :value="modbusConfig.mode" />
           </el-descriptions-item>
@@ -197,8 +197,8 @@ const props = defineProps<{
 const message = useMessage()
 
 // ======================= 连接配置 =======================
-const isMaster = computed(() => props.product.protocolType === ProtocolTypeEnum.MODBUS_TCP_MASTER) // 是否为 Master 模式
-const isSlave = computed(() => props.product.protocolType === ProtocolTypeEnum.MODBUS_TCP_SLAVE) // 是否为 Slave 模式
+const isClient = computed(() => props.product.protocolType === ProtocolTypeEnum.MODBUS_TCP_CLIENT) // 是否为 Client 模式
+const isServer = computed(() => props.product.protocolType === ProtocolTypeEnum.MODBUS_TCP_SERVER) // 是否为 Server 模式
 const modbusConfig = ref<DeviceModbusConfigVO>({} as DeviceModbusConfigVO)
 
 /** 获取连接配置 */
