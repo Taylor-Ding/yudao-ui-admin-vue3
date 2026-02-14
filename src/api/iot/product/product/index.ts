@@ -16,7 +16,8 @@ export interface ProductVO {
   status: number // 产品状态
   deviceType: number // 设备类型
   netType: number // 联网方式
-  codecType: string // 数据格式（编解码器类型）
+  protocolType: string // 协议类型
+  serializeType: string // 序列化类型
   deviceCount: number // 设备数量
   createTime: Date // 创建时间
 }
@@ -27,9 +28,23 @@ export enum DeviceTypeEnum {
   GATEWAY_SUB = 1, // 网关子设备
   GATEWAY = 2 // 网关设备
 }
-// IOT 数据格式（编解码器类型）枚举类
-export enum CodecTypeEnum {
-  ALINK = 'Alink' // 阿里云 Alink 协议
+// IoT 协议类型枚举
+export enum ProtocolTypeEnum {
+  TCP = 'tcp',
+  UDP = 'udp',
+  WEBSOCKET = 'websocket',
+  HTTP = 'http',
+  MQTT = 'mqtt',
+  EMQX = 'emqx',
+  COAP = 'coap',
+  MODBUS_TCP_CLIENT = 'modbus_tcp_client',
+  MODBUS_TCP_SERVER = 'modbus_tcp_server'
+}
+
+// IoT 序列化类型枚举
+export enum SerializeTypeEnum {
+  JSON = 'json',
+  BINARY = 'binary'
 }
 
 // IoT 产品 API

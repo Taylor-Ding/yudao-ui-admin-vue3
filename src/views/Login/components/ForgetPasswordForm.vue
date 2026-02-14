@@ -39,6 +39,7 @@
       </el-col>
       <Verify
         ref="verify"
+        v-if="resetPasswordData.captchaEnable === 'true'"
         :captchaType="captchaType"
         :imgSize="{ width: '400px', height: '200px' }"
         mode="pop"

@@ -42,13 +42,29 @@
           @success="getDeviceData"
         />
       </el-tab-pane>
+      <el-tab-pane
+        label="Modbus 配置"
+        name="modbus"
+        v-if="
+          [ProtocolTypeEnum.MODBUS_TCP_CLIENT, ProtocolTypeEnum.MODBUS_TCP_SERVER].includes(
+            product.protocolType as ProtocolTypeEnum
+          )
+        "
+      >
+        <DeviceModbusConfig
+          v-if="activeTab === 'modbus'"
+          :device="device"
+          :product="product"
+          :thing-model-list="thingModelList"
+        />
+      </el-tab-pane>
     </el-tabs>
   </el-col>
 </template>
 <script lang="ts" setup>
 import { useTagsViewStore } from '@/store/modules/tagsView'
 import { DeviceApi, DeviceVO } from '@/api/iot/device/device'
-import { DeviceTypeEnum, ProductApi, ProductVO } from '@/api/iot/product/product'
+import { DeviceTypeEnum, ProductApi, ProductVO, ProtocolTypeEnum } from '@/api/iot/product/product'
 import { ThingModelApi, ThingModelData } from '@/api/iot/thingmodel'
 import DeviceDetailsHeader from './DeviceDetailsHeader.vue'
 import DeviceDetailsInfo from './DeviceDetailsInfo.vue'
@@ -56,6 +72,7 @@ import DeviceDetailsThingModel from './DeviceDetailsThingModel.vue'
 import DeviceDetailsMessage from './DeviceDetailsMessage.vue'
 import DeviceDetailsSimulator from './DeviceDetailsSimulator.vue'
 import DeviceDetailConfig from './DeviceDetailConfig.vue'
+import DeviceModbusConfig from './DeviceModbusConfig.vue'
 import DeviceDetailsSubDevice from './DeviceDetailsSubDevice.vue'
 
 defineOptions({ name: 'IoTDeviceDetail' })

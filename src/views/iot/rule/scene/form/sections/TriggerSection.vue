@@ -90,6 +90,12 @@
                   />
                 </el-form-item>
               </div>
+
+              <!-- 附加条件组配置 -->
+              <TimerConditionGroupConfig
+                :model-value="triggerItem.conditionGroups"
+                @update:model-value="(value) => updateTriggerConditionGroups(index, value)"
+              />
             </div>
           </div>
         </div>
@@ -115,8 +121,9 @@
 <script setup lang="ts">
 import { useVModel } from '@vueuse/core'
 import DeviceTriggerConfig from '../configs/DeviceTriggerConfig.vue'
+import TimerConditionGroupConfig from '../configs/TimerConditionGroupConfig.vue'
 import { Crontab } from '@/components/Crontab'
-import type { Trigger } from '@/api/iot/rule/scene'
+import type { Trigger, TriggerCondition } from '@/api/iot/rule/scene'
 import {
   getTriggerTypeLabel,
   IotRuleSceneTriggerTypeEnum,
@@ -195,6 +202,15 @@ const updateTriggerDeviceConfig = (index: number, newTrigger: Trigger) => {
  */
 const updateTriggerCronConfig = (index: number, cronExpression?: string) => {
   triggers.value[index].cronExpression = cronExpression
+}
+
+/**
+ * 更新触发器条件组配置
+ * @param index 触发器索引
+ * @param conditionGroups 条件组数组
+ */
+const updateTriggerConditionGroups = (index: number, conditionGroups: TriggerCondition[][]) => {
+  triggers.value[index].conditionGroups = conditionGroups
 }
 
 /**

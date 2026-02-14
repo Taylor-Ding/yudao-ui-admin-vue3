@@ -9,8 +9,11 @@
       <el-descriptions-item label="创建时间">
         {{ formatDate(product.createTime) }}
       </el-descriptions-item>
-      <el-descriptions-item label="数据格式">
-        <dict-tag :type="DICT_TYPE.IOT_CODEC_TYPE" :value="product.codecType" />
+      <el-descriptions-item label="协议类型">
+        <dict-tag :type="DICT_TYPE.IOT_PROTOCOL_TYPE" :value="product.protocolType" />
+      </el-descriptions-item>
+      <el-descriptions-item label="序列化类型">
+        <dict-tag :type="DICT_TYPE.IOT_SERIALIZE_TYPE" :value="product.serializeType" />
       </el-descriptions-item>
       <el-descriptions-item label="产品状态">
         <dict-tag :type="DICT_TYPE.IOT_PRODUCT_STATUS" :value="product.status" />
