@@ -4,7 +4,7 @@
       ref="formRef"
       :model="formData"
       :rules="formRules"
-      label-width="110px"
+      label-width="120px"
       v-loading="formLoading"
     >
       <el-form-item label="ProductKey" prop="productKey">
@@ -49,11 +49,7 @@
         label="联网方式"
         prop="netType"
       >
-        <el-select
-          v-model="formData.netType"
-          placeholder="请选择联网方式"
-          :disabled="formType === 'update'"
-        >
+        <el-select v-model="formData.netType" placeholder="请选择联网方式">
           <el-option
             v-for="dict in getIntDictOptions(DICT_TYPE.IOT_NET_TYPE)"
             :key="dict.value"
@@ -62,16 +58,36 @@
           />
         </el-select>
       </el-form-item>
-      <el-form-item label="数据格式" prop="codecType">
-        <el-radio-group v-model="formData.codecType" :disabled="formType === 'update'">
-          <el-radio
-            v-for="dict in getStrDictOptions(DICT_TYPE.IOT_CODEC_TYPE)"
+      <el-form-item label="协议类型" prop="protocolType">
+        <el-select v-model="formData.protocolType" placeholder="请选择协议类型">
+          <el-option
+            v-for="dict in getStrDictOptions(DICT_TYPE.IOT_PROTOCOL_TYPE)"
             :key="dict.value"
-            :label="dict.value"
+            :label="dict.label"
+            :value="dict.value"
+          />
+        </el-select>
+      </el-form-item>
+      <el-form-item prop="serializeType">
+        <template #label>
+          <el-tooltip
+            content="iot-gateway-server 默认根据接入的协议类型确定数据格式，仅 MQTT、EMQX 协议支持自定义序列化类型"
+            placement="top"
           >
-            {{ dict.label }}
-          </el-radio>
-        </el-radio-group>
+            <span>
+              序列化类型
+              <Icon icon="ep:question-filled" class="ml-2px" />
+            </span>
+          </el-tooltip>
+        </template>
+        <el-select v-model="formData.serializeType" placeholder="请选择序列化类型">
+          <el-option
+            v-for="dict in getStrDictOptions(DICT_TYPE.IOT_SERIALIZE_TYPE)"
+            :key="dict.value"
+            :label="dict.label"
+            :value="dict.value"
+          />
+        </el-select>
       </el-form-item>
       <el-collapse>
         <el-collapse-item title="更多配置">
@@ -109,7 +125,13 @@
 </template>
 
 <script setup lang="ts">
-import { ProductApi, ProductVO, CodecTypeEnum, DeviceTypeEnum } from '@/api/iot/product/product'
+import {
+  ProductApi,
+  ProductVO,
+  ProtocolTypeEnum,
+  SerializeTypeEnum,
+  DeviceTypeEnum
+} from '@/api/iot/product/product'
 import { DICT_TYPE, getIntDictOptions, getStrDictOptions } from '@/utils/dict'
 import { ProductCategoryApi, ProductCategoryVO } from '@/api/iot/product/category'
 import { UploadImg } from '@/components/UploadFile'
@@ -134,7 +156,8 @@ const formData = ref({
   description: undefined,
   deviceType: undefined,
   netType: undefined,
-  codecType: CodecTypeEnum.ALINK,
+  protocolType: ProtocolTypeEnum.MQTT,
+  serializeType: SerializeTypeEnum.JSON,
   registerEnabled: false
 })
 const formRules = reactive({
@@ -149,7 +172,8 @@ const formRules = reactive({
       trigger: 'change'
     }
   ],
-  codecType: [{ required: true, message: '数据格式不能为空', trigger: 'change' }]
+  protocolType: [{ required: true, message: '协议类型不能为空', trigger: 'change' }],
+  serializeType: [{ required: true, message: '序列化类型不能为空', trigger: 'change' }]
 })
 const formRef = ref()
 const categoryList = ref<ProductCategoryVO[]>([]) // 产品分类列表
@@ -209,7 +233,8 @@ const resetForm = () => {
     description: undefined,
     deviceType: undefined,
     netType: undefined,
-    codecType: CodecTypeEnum.ALINK,
+    protocolType: ProtocolTypeEnum.MQTT,
+    serializeType: SerializeTypeEnum.JSON,
     registerEnabled: false
   }
   formRef.value?.resetFields()

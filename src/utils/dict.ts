@@ -233,7 +233,8 @@ export enum DICT_TYPE {
   IOT_NET_TYPE = 'iot_net_type', // IOT 联网方式
   IOT_PRODUCT_STATUS = 'iot_product_status', // IOT 产品状态
   IOT_PRODUCT_DEVICE_TYPE = 'iot_product_device_type', // IOT 产品设备类型
-  IOT_CODEC_TYPE = 'iot_codec_type', // IOT 数据格式（编解码器类型）
+  IOT_PROTOCOL_TYPE = 'iot_protocol_type', // IOT 协议类型
+  IOT_SERIALIZE_TYPE = 'iot_serialize_type', // IOT 序列化类型
   IOT_LOCATION_TYPE = 'iot_location_type', // IOT 定位类型
   IOT_DEVICE_STATE = 'iot_device_state', // IOT 设备状态
   IOT_THING_MODEL_TYPE = 'iot_thing_model_type', // IOT 产品功能类型
@@ -247,5 +248,7 @@ export enum DICT_TYPE {
   IOT_ALERT_RECEIVE_TYPE = 'iot_alert_receive_type', // IoT 告警接收类型
   IOT_OTA_TASK_DEVICE_SCOPE = 'iot_ota_task_device_scope', // IoT OTA任务设备范围
   IOT_OTA_TASK_STATUS = 'iot_ota_task_status', // IoT OTA 任务状态
-  IOT_OTA_TASK_RECORD_STATUS = 'iot_ota_task_record_status' // IoT OTA 记录状态
+  IOT_OTA_TASK_RECORD_STATUS = 'iot_ota_task_record_status', // IoT OTA 记录状态
+  IOT_MODBUS_MODE = 'iot_modbus_mode', // IoT Modbus 工作模式
+  IOT_MODBUS_FRAME_FORMAT = 'iot_modbus_frame_format' // IoT Modbus 帧格式
 }
