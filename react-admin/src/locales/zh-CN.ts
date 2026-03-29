@@ -1,0 +1,16 @@
+export default {
+  'nav.home': '首页',
+  'nav.login': '登录',
+  'nav.register': '注册',
+  'welcome.title': '欢迎来到管理面板',
+  'welcome.message': '这是你的新 React 应用的首页。',
+  'login.username': '用户名',
+  'login.password': '密码',
+  'login.login': '登录',
+  'login.register': '立即注册!',
+  'register.username': '用户名',
+  'register.password': '密码',
+  'register.confirmPassword': '确认密码',
+  'register.register': '注册',
+  'register.login': '立即登录!',
+};
