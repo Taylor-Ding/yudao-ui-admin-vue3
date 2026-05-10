@@ -15,11 +15,17 @@ export interface UserVO {
   remark: string
   loginDate: Date
   createTime: Date
+  disabled?: boolean
 }
 
 // 查询用户管理列表
 export const getUserPage = (params: PageParam) => {
   return request.get({ url: '/system/user/page', params })
+}
+
+// 查询用户管理列表
+export const getUserList = (ids: number[]) => {
+  return request.get({ url: '/system/user/list', params: { ids: ids.join(',') } })
 }
 
 // 查询用户详情
