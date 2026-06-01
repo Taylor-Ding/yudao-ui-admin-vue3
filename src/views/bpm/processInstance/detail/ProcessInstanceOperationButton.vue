@@ -501,8 +501,8 @@
       class="hover-bg-gray-100 rounded-xl p-6px"
       v-if="
         userId === processInstance?.startUser?.id &&
-          isEndProcessStatus(processInstance?.status) &&
-          processDefinition?.formType === 10
+        isEndProcessStatus(processInstance?.status) &&
+        processDefinition?.formType === 10
       "
     >
       <Icon :size="14" icon="ep:refresh" />&nbsp; 再次提交
@@ -513,7 +513,7 @@
   <SignDialog ref="signRef" @success="handleSignFinish" />
 </template>
 <script lang="ts" setup>
-import { useUserStoreWithOut } from '@/store/modules/user'
+import { getCurrentUserId } from '@/utils/auth'
 import { setConfAndFields2 } from '@/utils/formCreate'
 import * as TaskApi from '@/api/bpm/task'
 import * as ProcessInstanceApi from '@/api/bpm/processInstance'
@@ -536,7 +536,7 @@ defineOptions({ name: 'ProcessInstanceBtnContainer' })
 const router = useRouter() // 路由
 const message = useMessage() // 消息弹窗
 
-const userId = useUserStoreWithOut().getUser.id // 当前登录的编号
+const userId = getCurrentUserId() // 当前登录的编号
 const emit = defineEmits(['success']) // 定义 success 事件，用于操作成功后的回调
 
 const props = defineProps<{

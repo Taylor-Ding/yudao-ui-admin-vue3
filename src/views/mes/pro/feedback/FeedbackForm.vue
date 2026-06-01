@@ -19,7 +19,9 @@
               :disabled="isHeaderReadonly"
             >
               <template #append>
-                <el-button @click="generateCode"> 生成 </el-button>
+                <el-button :disabled="isHeaderReadonly" @click="generateCode">
+                  生成
+                </el-button>
               </template>
             </el-input>
           </el-form-item>
@@ -61,9 +63,7 @@
               v-model="formData.taskId"
               :workOrderId="formData.workOrderId"
               :workstationId="formData.workstationId"
-              :statuses="[
-                MesProTaskStatusEnum.PREPARE
-              ]"
+              :statuses="[MesProTaskStatusEnum.PREPARE]"
               :disabled="isHeaderReadonly || !formData.workOrderId"
               placeholder="请选择任务"
               @change="handleTaskChange"
@@ -241,8 +241,8 @@
     <el-tabs
       v-if="
         formData.id &&
-          formData.status !== MesProFeedbackStatusEnum.PREPARE &&
-          formData.status !== MesProFeedbackStatusEnum.APPROVING
+        formData.status !== MesProFeedbackStatusEnum.PREPARE &&
+        formData.status !== MesProFeedbackStatusEnum.APPROVING
       "
       type="border-card"
       class="mt-10px"
@@ -298,7 +298,7 @@ import MdWorkstationSelect from '@/views/mes/md/workstation/components/MdWorksta
 import UserSelectV2 from '@/views/system/user/components/UserSelectV2.vue'
 import ItemConsumeList from './ItemConsumeList.vue'
 import ProductProduceList from './ProductProduceList.vue'
-import { useUserStore } from '@/store/modules/user'
+import { getCurrentUserId } from '@/utils/auth'
 import {
   MesAutoCodeRuleCode,
   MesProFeedbackStatusEnum,
@@ -484,7 +484,7 @@ const open = async (type: string, id?: number) => {
     }
   } else {
     // 创建模式：默认报工人为当前用户，报工时间为当前时间
-    formData.value.feedbackUserId = useUserStore().getUser.id
+    formData.value.feedbackUserId = getCurrentUserId()
     formData.value.feedbackTime = new Date()
     // 自动生成报工单号
     await generateCode()
