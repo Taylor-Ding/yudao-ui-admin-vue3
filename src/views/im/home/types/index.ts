@@ -6,25 +6,39 @@ export interface WebSocketFrame {
   content: string // 帧内容（JSON 字符串）
 }
 
-// 私聊消息 DTO（对齐后端 ImPrivateMessageDTO）
-export interface ImPrivateMessageDTO {
+// IM WebSocket 通知 DTO（对齐后端 ImNotificationWebSocketDTO）
+export interface ImNotificationWebSocketDTO {
+  conversationType: number // 会话类型
+  contentType: number // 内容类型
+  payload: Record<string, any> // 负载数据
+}
+
+// 无会话在线通知（对齐后端 conversationType = NONE 的独立 payload）
+export interface ImNoConversationNotification {
+  type: number // 内容类型
+  [key: string]: any
+}
+
+// 私聊消息 DTO（对齐后端 ImPrivateMessageNotification）
+export interface ImPrivateMessageNotification {
   id: number // 消息编号
   clientMessageId: string // 客户端消息编号
   senderId: number // 发送人编号
   receiverId: number // 接收人编号
-  type: number // 消息类型
+  type: number // 内容类型
   content: string // 消息内容
   status: number // 消息状态
+  receiptStatus?: number // 回执状态（不需要 / 待完成 / 已完成）
   sendTime: string // 发送时间
 }
 
-// 群聊消息 DTO（对齐后端 ImGroupMessageDTO）
-export interface ImGroupMessageDTO {
+// 群聊消息 DTO（对齐后端 ImGroupMessageNotification）
+export interface ImGroupMessageNotification {
   id: number // 消息编号
   clientMessageId: string // 客户端消息编号
   senderId: number // 发送人编号
   groupId: number // 群编号
-  type: number // 消息类型
+  type: number // 内容类型
   content: string // 消息内容
   status: number // 消息状态
   sendTime: string // 发送时间
@@ -35,13 +49,35 @@ export interface ImGroupMessageDTO {
   readId?: number // 已读位置
 }
 
+// 消息已读同步通知（对齐后端 ImMessageReadNotification）
+export interface ImMessageReadNotification {
+  id: number // 已读位置
+  type: number // 内容类型
+  senderId?: number // 发送人编号
+  receiverId?: number // 私聊接收人编号
+  groupId?: number // 群编号
+  channelId?: number // 频道编号
+  readId?: number // 已读位置
+}
+
+// 消息回执通知（对齐后端 ImMessageReceiptNotification）
+export interface ImMessageReceiptNotification {
+  id: number // 消息编号
+  type: number // 内容类型
+  senderId?: number // 已读方用户编号
+  receiverId?: number // 私聊接收人编号
+  groupId?: number // 群编号
+  readCount?: number // 群回执已读人数
+  receiptStatus?: number // 群回执状态
+}
+
 // ==================== 本地会话 / 消息结构 ====================
 
 /** 引用消息 */
 export interface QuoteMessage {
   messageId: number // 引用消息编号
   senderId: number // 引用消息发送人编号
-  type: number // 引用消息类型
+  type: number // 引用内容类型
   content: string // 引用消息内容
 }
 
@@ -60,7 +96,7 @@ export interface Conversation {
   lastContent: string // 会话列表展示的最后一条消息摘要
   lastSendTime: number // 最后一条消息时间，用于排序
   lastSenderId?: number // 发送人编号
-  lastMessageType?: number // 消息类型，对齐 ImMessageType
+  lastMessageType?: number // 内容类型，对齐 ImContentType
   lastMessageId?: number // 最后一条服务端消息编号
   lastClientMessageId?: string // 最后一条客户端消息编号
   lastMessageStatus?: number // 最后一条消息状态
@@ -74,6 +110,7 @@ export interface Conversation {
   silent?: boolean // 是否免打扰（不展示未读徽标 + 不响提示音）
   atMe?: boolean // 群聊：是否有人 @我
   atAll?: boolean // 群聊：是否有人 @全体成员
+  reportedReadMessageId?: number // 已上报到服务端的最大已读消息编号
   draft?: {
     html: string // 输入框 HTML
     plain: string // 输入框纯文本
@@ -83,17 +120,17 @@ export interface Conversation {
 
 // 消息数据结构
 export interface Message {
-  // ========== 后端字段（对齐 ImPrivateMessageDTO / ImGroupMessageDTO） ==========
+  // ========== 后端字段（对齐 ImPrivateMessageNotification / ImGroupMessageNotification） ==========
   id?: number // 服务端消息编号，发送中为空
   clientMessageId: string // 客户端消息编号，本地生成用于合并去重
-  type: number // 消息类型，对齐 ImMessageType
+  type: number // 内容类型，对齐 ImContentType
   content: string // 消息内容，JSON 字符串
   status: number // 消息状态，对齐 ImMessageStatus
   sendTime: number // 发送时间（前端转毫秒时间戳；后端为 LocalDateTime 字符串）
   senderId: number // 发送人编号
   atUserIds?: number[] // 群 @ 目标用户列表
   receiverUserIds?: number[] // 群定向接收用户列表
-  receiptStatus?: number // 群回执状态，对齐 ImGroupReceiptStatus（仅群消息）
+  receiptStatus?: number // 回执状态，对齐 ImMessageReceiptStatus（私聊 / 群 / 频道通用）
   readCount?: number // 群回执已读人数（仅群消息）
   materialId?: number // 关联频道素材编号（仅频道消息 type=MATERIAL）
 
@@ -111,16 +148,31 @@ export interface Message {
 
 // ==================== IndexedDB 本地存储结构 ====================
 
+/** 会话 IndexedDB 存储结构 */
 export interface ConversationDO extends Conversation {
   clientConversationId: string // `${type}:${targetId}`
 }
 
+export interface ConversationRead {
+  conversationType: number // 会话类型，对齐 ImConversationType
+  targetId: number // 会话目标编号
+  messageId: number // 当前用户已读到的最大消息编号
+  updateTime?: number // 更新时间
+}
+
+/** 会话读位置 IndexedDB 存储结构 */
+export interface ConversationReadDO extends ConversationRead {
+  clientConversationId: string // `${conversationType}:${targetId}`
+}
+
+/** 消息 IndexedDB 存储结构 */
 export interface MessageDO extends Omit<Message, 'uploadProgress' | '_localFile' | '_ackMerging'> {
   messageKey: string // `${conversationType}:${id}` 或 `client:${clientMessageId}`
   conversationType: number // 会话类型，对齐 ImConversationType
   clientConversationId: string // ConversationDO.clientConversationId
 }
 
+/** 设置 IndexedDB 存储结构 */
 export interface SettingDO<T = unknown> {
   key: string
   value: T
@@ -141,16 +193,25 @@ export interface Group {
   mutedAll?: boolean // 是否全群禁言
   banned?: boolean // 是否被管理员封禁
   joinApproval?: boolean // 进群是否需群主 / 管理员审批
+  joinStatus?: number // 当前登录用户在该群的成员状态（参见 CommonStatusEnum：0 在群 / 1 已退群）；历史退群群仍返回，供展示历史消息的群名 / 头像
 
   // ========== 前端扩展字段（user-per-group 维度） ==========
   silent?: boolean // 是否免打扰。从当前用户的 GroupMember 回填
   groupRemark?: string // 群备注。从当前用户的 GroupMember 回填（当前用户对该群的自定义名）
   members?: GroupMember[] // 群成员缓存（按需懒加载）
+  infoLoaded?: boolean // 群详情是否已加载，本轮会话内存标记，不持久化
+  activeCallLoaded?: boolean // 群活跃通话是否已探测，本轮会话内存标记，不持久化
+  activeCallExpired?: boolean // 群活跃通话探测是否已过期
   membersLoaded?: boolean // members 是否"完整加载"——只有整群 loadGroupMemberList / fetchGroupMemberList 命中时为 true；fetchGroupMember 单成员补齐不置位，避免 fetchGroupMemberList(force=false) 命中缓存时误判整群已加载
+  membersExpired?: boolean // 群成员缓存是否已过期；重连 / 重新进入 IM 后只标记不删除，下次进入群会话再刷新
   memberCount?: number // 成员总数
 }
 
-export type GroupDO = Omit<Group, 'members' | 'membersLoaded'>
+/** 群 IndexedDB 存储结构 */
+export type GroupDO = Omit<
+  Group,
+  'activeCallExpired' | 'activeCallLoaded' | 'infoLoaded' | 'members' | 'membersLoaded' | 'membersExpired'
+>
 
 // 群成员实体（前端内部结构）
 export interface GroupMember {
@@ -169,6 +230,7 @@ export interface GroupMember {
   isOwner?: boolean // 是否群主（前端从 Group.ownerUserId 计算）
 }
 
+/** 群成员 IndexedDB 存储结构 */
 export type GroupMemberDO = GroupMember
 
 // ==================== 好友 ====================
@@ -192,6 +254,7 @@ export interface Friend {
   deleteTime?: number // 删除好友时间（毫秒时间戳；后端为 LocalDateTime 字符串，在 convertFriend 转换）
 }
 
+/** 好友 IndexedDB 存储结构 */
 export type FriendDO = Friend
 
 /**
@@ -216,10 +279,13 @@ export interface FriendRequest {
   toAvatar?: string // 接收方头像
 }
 
+/** 好友申请 IndexedDB 存储结构 */
 export type FriendRequestDO = FriendRequest
 
+/** 加群申请 IndexedDB 存储结构 */
 export type GroupRequestDO = import('@/api/im/group/request').ImGroupRequestRespVO
 
+/** 频道 IndexedDB 存储结构 */
 export type ChannelDO = import('@/api/im/manager/channel').ImManagerChannelVO
 
 // ==================== 用户名片 ====================

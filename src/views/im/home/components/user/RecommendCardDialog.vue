@@ -115,10 +115,11 @@ import { useConversationStore } from '../../store/conversationStore'
 import { useFriendStore } from '../../store/friendStore'
 import { useGroupStore } from '../../store/groupStore'
 import { useMessageSender } from '../../composables/useMessageSender'
-import { ImConversationType, ImMessageType, isGroupConversation } from '../../../utils/constants'
+import { ImConversationType, ImContentType, isGroupConversation } from '../../../utils/constants'
 import { getConversationKey } from '../../../utils/conversation'
 import { buildDefaultGroupName } from '../../../utils/group'
 import { serializeMessage, type CardTarget } from '../../../utils/message'
+import { getGroupDisplayName, isGroupQuit } from '../../../utils/user'
 import type { Conversation, FriendLite } from '../../types'
 
 defineOptions({ name: 'ImRecommendCardDialog' })
@@ -162,9 +163,15 @@ const headerTitle = computed(() => {
   return isGroupConversation(target.value?.targetType) ? '把这个群推荐给朋友' : '把他推荐给朋友'
 })
 
-/** 候选会话：从 store 拿排序后的列表（hide 由 Panel 接 hideKeys 过滤） */
-const candidateConversations = computed<Conversation[]>(
-  () => conversationStore.getSortedConversationList
+/** 候选会话：从 store 拿排序后的列表（hide 由 Panel 接 hideKeys 过滤）；历史退群群不可被推荐选中（选了后端也会拒） */
+const candidateConversations = computed<Conversation[]>(() =>
+  conversationStore.getSortedConversationList.filter(
+    (conversation) =>
+      !(
+        conversation.type === ImConversationType.GROUP &&
+        isGroupQuit(groupStore.getGroup(conversation.targetId))
+      )
+  )
 )
 
 /** 隐藏 key：不能把名片推回名片本身的会话（用户名片避免自推、群名片避免推回该群） */
@@ -214,7 +221,7 @@ async function handleSend() {
   sending.value = true
   try {
     const tasks = targets.map(async (conversation) => {
-      const cardOk = await sendRaw(ImMessageType.CARD, cardContent, { conversation })
+      const cardOk = await sendRaw(ImContentType.CARD, cardContent, { conversation })
       if (!cardOk) {
         return { conversation, ok: false }
       }
@@ -276,13 +283,13 @@ async function handleCreateGroupAndSend() {
     const newConversation: Conversation = {
       type: ImConversationType.GROUP,
       targetId: group.id,
-      name: group.name || name,
+      name: getGroupDisplayName(group) || name,
       avatar: group.avatar || '',
       unreadCount: 0,
       lastContent: '',
       lastSendTime: 0
     }
-    const cardOk = await sendRaw(ImMessageType.CARD, serializeMessage({ ...card }), {
+    const cardOk = await sendRaw(ImContentType.CARD, serializeMessage({ ...card }), {
       conversation: newConversation
     })
     if (!cardOk) {

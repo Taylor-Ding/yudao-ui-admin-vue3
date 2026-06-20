@@ -7,13 +7,15 @@ export interface ImChannelMessageRespVO {
   materialId: number
   type: number
   content: string
-  /** 当前用户已读态；pull 时按 Redis 游标计算填充，多端同步使用 */
-  status?: number
+  receiptStatus?: number
   sendTime: string
 }
 
 // 拉取当前用户应收的频道消息（离线增量）；按 minId 游标分页
-export const pullChannelMessages = (params: { minId: number; size?: number }, signal?: AbortSignal) => {
+export const pullChannelMessageList = (
+  params: { minId: number; size?: number },
+  signal?: AbortSignal
+) => {
   return request.get<ImChannelMessageRespVO[]>({
     url: '/im/channel/message/pull',
     params,

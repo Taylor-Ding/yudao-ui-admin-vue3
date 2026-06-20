@@ -24,7 +24,10 @@
       </div>
 
       <!-- 成员宫格：仅 member 渲染（陌生群拉不到成员） -->
-      <div v-if="isMember && members.length" class="flex flex-wrap gap-2 justify-center w-full pt-2">
+      <div
+        v-if="isMember && members.length"
+        class="flex flex-wrap gap-2 justify-center w-full pt-2"
+      >
         <GroupMemberGrid
           v-for="member in members"
           :key="member.userId"
@@ -53,7 +56,7 @@ import { getCurrentUserId } from '@/utils/auth'
 import { CommonStatusEnum } from '@/utils/constants'
 import { useFriendStore } from '../../store/friendStore'
 import { useGroupStore } from '../../store/groupStore'
-import { getMemberDisplayName } from '../../../utils/user'
+import { getMemberDisplayName, isGroupQuit } from '../../../utils/user'
 import type { Friend, GroupLite, GroupMember } from '../../types'
 import type { GroupMemberLite } from './GroupMember.vue'
 
@@ -89,16 +92,23 @@ const isMember = computed(() => {
   if (!cached) {
     return false
   }
+  // 历史退群群：直接判 false，避免成员未加载时误显示「进入群聊」
+  if (isGroupQuit(cached)) {
+    return false
+  }
   if (cached.membersLoaded && cached.members) {
     const myId = getCurrentUserId()
-    return cached.members.some(
-      (m) => m.userId === myId && m.status === CommonStatusEnum.ENABLE
-    )
+    return cached.members.some((m) => m.userId === myId && m.status === CommonStatusEnum.ENABLE)
   }
   return true
 })
-/** 是否未加群：有 id 但 isMember 不成立；对比 isMember 用于动作区按钮分支 */
-const isStranger = computed(() => !!props.group?.id && !isMember.value)
+/** 历史退群群：只读，动作区两个按钮都不渲染（既不「进入群聊」也不「加入群聊」） */
+const isQuitGroup = computed(() => {
+  const id = props.group?.id
+  return id != null && isGroupQuit(groupStore.getGroup(id))
+})
+/** 是否未加群：有 id、非成员、且非历史退群群；只有真·陌生人才给「加入群聊」 */
+const isStranger = computed(() => !!props.group?.id && !isMember.value && !isQuitGroup.value)
 
 /** 成员数文案：member 优先用本地拉到的列表长度，stranger 用 props.group.memberCount 卡片快照 */
 const memberCountText = computed(() => {
@@ -116,13 +126,11 @@ watch(
     if (!id || !member) {
       return
     }
-    const list = await groupStore.fetchGroupMemberList(id)
+    const list = await groupStore.fetchGroupMemberList(id, true)
     if (props.group?.id !== id) {
       return
     }
-    members.value = list.map((m) =>
-      convertGroupMemberLite(m, friendStore.getFriend(m.userId))
-    )
+    members.value = list.map((m) => convertGroupMemberLite(m, friendStore.getFriend(m.userId)))
   },
   { immediate: true }
 )

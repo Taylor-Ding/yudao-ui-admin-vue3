@@ -4,10 +4,11 @@ import { getCurrentUserId } from '@/utils/auth'
 import { ImConversationType } from './constants'
 import type { MessageDO, SettingDO } from '../home/types'
 
-export const DB_SCHEMA_VERSION = 1
+export const DB_SCHEMA_VERSION = 2
 
 export type DbStoreName =
   | 'conversations'
+  | 'conversationReads'
   | 'messages'
   | 'friends'
   | 'friendRequests'
@@ -35,7 +36,17 @@ export const StorageKeys = {
     /** 频道消息拉取游标 */
     channelMessageMaxId: 'channelMessageMaxId',
     /** 最近转发会话 key 列表 */
-    recentForwardConversationKeys: 'recentForwardConversationKeys'
+    recentForwardConversationKeys: 'recentForwardConversationKeys',
+    // 状态事件补偿增量拉取游标：与上面消息 maxId 游标共用同一 settings keyspace，统一登记在此避免撞 key；
+    // 走 update_time + id 复合游标（非单条 maxId），故用 PullCursor 后缀区分语义
+    /** 好友关系增量拉取游标 */
+    friendPullCursor: 'friendPullCursor',
+    /** 好友申请增量拉取游标 */
+    friendRequestPullCursor: 'friendRequestPullCursor',
+    /** 加群申请增量拉取游标 */
+    groupRequestPullCursor: 'groupRequestPullCursor',
+    /** 会话读位置增量拉取游标 */
+    conversationReadPullCursor: 'conversationReadPullCursor'
   }
 } as const
 
@@ -92,6 +103,12 @@ function upgradeSchema(db: IDBDatabase) {
   if (!db.objectStoreNames.contains('conversations')) {
     const store = db.createObjectStore('conversations', { keyPath: 'clientConversationId' })
     createIndex(store, 'lastSendTime', 'lastSendTime')
+  }
+  if (!db.objectStoreNames.contains('conversationReads')) {
+    const store = db.createObjectStore('conversationReads', { keyPath: 'clientConversationId' })
+    createIndex(store, 'conversationType+targetId', ['conversationType', 'targetId'], {
+      unique: true
+    })
   }
   if (!db.objectStoreNames.contains('messages')) {
     const store = db.createObjectStore('messages', { keyPath: 'messageKey' })
@@ -185,7 +202,25 @@ function guardSession(session: number) {
 
 /** 克隆可入库对象 */
 function toDbValue<T>(value: T): T {
-  return toRaw(value) as T
+  return cloneDbValue(value) as T
+}
+
+/** 转换为 IndexedDB 可克隆对象 */
+function cloneDbValue(value: unknown): unknown {
+  const raw = toRaw(value)
+  if (Array.isArray(raw)) {
+    return raw.map((item) => cloneDbValue(item))
+  }
+  if (!raw || typeof raw !== 'object') {
+    return raw
+  }
+  const prototype = Object.getPrototypeOf(raw)
+  if (prototype !== Object.prototype && prototype !== null) {
+    return raw
+  }
+  return Object.fromEntries(
+    Object.entries(raw as Record<string, unknown>).map(([key, item]) => [key, cloneDbValue(item)])
+  )
 }
 
 class DbClient {
@@ -208,9 +243,7 @@ class DbClient {
     if (tx) {
       return requestToPromise<T[]>(tx.objectStore(storeName).getAll())
     }
-    return this.transaction<T[]>([storeName], 'readonly', (tx) =>
-      this.getAll<T>(storeName, tx)
-    )
+    return this.transaction<T[]>([storeName], 'readonly', (tx) => this.getAll<T>(storeName, tx))
   }
 
   /** 按唯一索引获取单条记录 */
@@ -258,9 +291,7 @@ class DbClient {
       await requestToPromise(tx.objectStore(storeName).delete(key))
       return
     }
-    await this.transaction([storeName], 'readwrite', (tx) =>
-      this.delete(storeName, key, tx)
-    )
+    await this.transaction([storeName], 'readwrite', (tx) => this.delete(storeName, key, tx))
   }
 
   /** 清空 store 记录 */

@@ -71,7 +71,7 @@
                 </div>
               </div>
             </el-popover>
-            <el-tooltip v-else content="通话" placement="bottom">
+            <el-tooltip v-else-if="!isQuitGroup" content="通话" placement="bottom">
               <Icon
                 icon="ant-design:phone-outlined"
                 :size="20"
@@ -97,7 +97,7 @@
 
         <!-- 群通话胶囊条：仅群聊 + 该群有活跃通话时显示；点击展开看成员 + 加入按钮 -->
         <RtcGroupCallBanner
-          v-if="isGroup && conversationStore.activeConversation"
+          v-if="isGroup && !isQuitGroup && conversationStore.activeConversation"
           :group-id="conversationStore.activeConversation.targetId"
         />
 
@@ -109,7 +109,7 @@
         />
         <!-- 群顶部「待处理加群申请」横幅：仅群聊 + owner / admin + count > 0 时显示 -->
         <GroupRequestPending
-          v-if="isGroup && conversationStore.activeConversation"
+          v-if="isGroup && !isQuitGroup && conversationStore.activeConversation"
           :group-id="conversationStore.activeConversation.targetId"
         />
         <!-- 私聊：对方不再是有效好友（我删了对方 / 从未加过；单边设计下「被对方删除」本端 friendStore 不更新故不会触发）；胶囊嵌在 header 内（跟群置顶同级），点击弹 UserInfoCard -->
@@ -231,7 +231,7 @@ import { useMessage } from '@/hooks/web/useMessage'
 import { useConversationStore } from '../../../../store/conversationStore'
 import { useFriendStore } from '../../../../store/friendStore'
 import { useImUiStore } from '../../../../store/uiStore'
-import { getMemberDisplayName } from '@/views/im/utils/user'
+import { getMemberDisplayName, isGroupQuit } from '@/views/im/utils/user'
 import { useGroupStore } from '../../../../store/groupStore'
 import MessageItem from './MessageItem.vue'
 import MessageInput from '../input/MessageInput.vue'
@@ -259,6 +259,8 @@ import { createCall } from '@/api/im/rtc'
 import { ImRtcCallMediaType, ImRtcCallStatus, ImConversationType } from '@/views/im/utils/constants'
 import { resolveCallEndReasonText } from '@/views/im/utils/message'
 import { getClientConversationId } from '@/views/im/utils/db'
+import { getCurrentUserId } from '@/utils/auth'
+import { getGroupDisplayName } from '@/views/im/utils/user'
 import { useRtcStore } from '../../../../store/rtcStore'
 import { useMessageStore } from '../../../../store/messageStore'
 
@@ -320,6 +322,15 @@ const isPrivate = computed(
 const isChannel = computed(
   () => conversationStore.activeConversation?.type === ImConversationType.CHANNEL
 )
+
+/** 当前激活会话是否历史退群群：禁群通话、隐藏群申请横幅等操作入口；聊天历史、群名头像照常展示 */
+const isQuitGroup = computed(() => {
+  const conversation = conversationStore.activeConversation
+  return (
+    conversation?.type === ImConversationType.GROUP &&
+    isGroupQuit(groupStore.getGroup(conversation.targetId))
+  )
+})
 
 /** 私聊会话且对端不是有效好友（本端 friend 记录缺失或 DISABLE）；单边删除语义下「被对方删除」不触发本端横幅 */
 const showNotFriendBanner = computed(() => {
@@ -394,12 +405,15 @@ const groupInfo = computed<
     return undefined
   }
   const group = groupStore.getGroup(conversation.targetId)
+  const selfMember = group?.members?.find((member) => member.userId === getCurrentUserId())
+  const showGroupName = group ? getGroupDisplayName(group) : conversation.name
   return {
     id: conversation.targetId,
     name: group?.name || conversation.name,
-    showGroupName: group?.name || conversation.name,
+    showGroupName,
     showImage: group?.avatar || conversation.avatar,
     notice: group?.notice,
+    remarkNickName: selfMember?.displayUserName,
     groupRemark: group?.groupRemark,
     ownerId: group?.ownerUserId,
     memberCount: group?.memberCount,
@@ -428,22 +442,27 @@ const groupMembers = computed<GroupMemberLite[]>(() => {
   })
 })
 
-/** 切换到群会话时同步群信息 + 成员；各自 fire-and-forget + catch，任何一项失败不牵连其它 */
+/** 切换到群会话时同步群信息 + 成员 */
 async function ensureGroupData(groupId: number) {
-  // 远程异步拉群信息（群名 / 公告 / 群主等元数据）
-  groupStore.fetchGroupInfo(groupId).catch((error) => {
+  // 远程拉群信息（群名 / 公告 / 群主等元数据）
+  await groupStore.fetchGroupInfo(groupId).catch((error) => {
     console.warn('[IM MessagePanel] fetchGroupInfo 失败', { groupId }, error)
   })
+  if (isGroupQuit(groupStore.getGroup(groupId))) {
+    return
+  }
 
   // 先从 IDB 同步加载群成员，让首帧立即出成员名 / 头像
   await groupStore.loadGroupMemberList(groupId).catch((error) => {
     console.warn('[IM MessagePanel] loadGroupMemberList 失败', { groupId }, error)
     return null
   })
-  // 再从远程异步拉成员，强刷以跳过 in-memory 缓存，每次进群都能拿到最新成员状态
-  groupStore.fetchGroupMemberList(groupId, true).catch((error) => {
-    console.warn('[IM MessagePanel] fetchGroupMemberList 失败', { groupId }, error)
-  })
+  const group = groupStore.getGroup(groupId)
+  if (!group?.membersLoaded || group.membersExpired) {
+    groupStore.fetchGroupMemberList(groupId).catch((error) => {
+      console.warn('[IM MessagePanel] fetchGroupMemberList 失败', { groupId }, error)
+    })
+  }
 }
 
 /** 群信息抽屉里点"刷新"：强拉一次最新群元数据 + 群成员 */
@@ -452,7 +471,7 @@ function reloadGroupData() {
   if (!conversation || conversation.type !== ImConversationType.GROUP) {
     return
   }
-  groupStore.fetchGroupInfo(conversation.targetId)
+  groupStore.fetchGroupInfo(conversation.targetId, true)
   groupStore.fetchGroupMemberList(conversation.targetId, true)
 }
 

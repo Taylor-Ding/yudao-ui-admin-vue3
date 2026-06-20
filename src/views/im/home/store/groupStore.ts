@@ -18,7 +18,7 @@ import {
   ImConversationType,
   ImGroupMemberRole,
   ImMessageStatus,
-  ImMessageType
+  ImContentType
 } from '../../utils/constants'
 import { CommonStatusEnum } from '@/utils/constants'
 import { getDb } from '../../utils/db'
@@ -26,6 +26,9 @@ import { getCurrentUserId } from '@/utils/auth'
 import { getGroupDisplayName } from '../../utils/user'
 import { type GroupNotificationPayload } from '../../utils/message'
 import type { Group, GroupDO, GroupMember, GroupMemberDO, Message } from '../types'
+
+/** clear() 时递增；旧账号 in-flight 的成员请求返回后比对一致才写 store */
+let storeEpoch = 0
 
 /**
  * fetchGroupMemberList 并发去重表：同 groupId 同时进的请求共用一个 Promise
@@ -47,7 +50,15 @@ const pendingSingleMemberKey = (userId: number, groupId: number, memberUserId: n
 
 /** 构建群 IndexedDB 记录 */
 function buildGroupDO(group: Group): GroupDO {
-  const { members: _members, membersLoaded: _membersLoaded, ...record } = group
+  const {
+    activeCallExpired: _activeCallExpired,
+    activeCallLoaded: _activeCallLoaded,
+    infoLoaded: _infoLoaded,
+    members: _members,
+    membersLoaded: _membersLoaded,
+    membersExpired: _membersExpired,
+    ...record
+  } = group
   return record
 }
 
@@ -55,6 +66,13 @@ function buildGroupDO(group: Group): GroupDO {
 function isSelfInPayloadMembers(payload: GroupNotificationPayload): boolean {
   const selfUserId = getCurrentUserId()
   return !!selfUserId && (payload.memberUserIds || []).includes(selfUserId)
+}
+
+/** 刷新我管理的群申请红点 */
+function refreshUnhandledGroupRequests(): void {
+  useGroupRequestStore()
+    .fetchUnhandledGroupRequestList()
+    .catch(() => undefined)
 }
 
 /**
@@ -68,8 +86,8 @@ function isSelfInPayloadMembers(payload: GroupNotificationPayload): boolean {
 export const useGroupStore = defineStore('imGroupStore', {
   state: () => ({
     groups: [] as Group[],
-    // 仅 fetchGroupList 成功后置位；loadGroupList（IDB）不置位，否则后台 SWR 刷新会被缓存命中跳过
-    loaded: false
+    loaded: false, // 仅 fetchGroupList 成功后置位；loadGroupList（IDB）不置位，否则后台 SWR 刷新会被缓存命中跳过
+    groupMembersExpired: false // 进入 IM / 重连后置位；IDB 里的成员桶延迟加载到内存时，也要按过期处理
   }),
 
   getters: {
@@ -119,13 +137,18 @@ export const useGroupStore = defineStore('imGroupStore', {
     },
 
     /** 保存单个群 */
-    saveGroup(group: Group | undefined): void {
+    async saveGroupRecord(group: Group | undefined): Promise<void> {
       if (!group) {
         return
       }
-      void getDb()
-        .put('groups', buildGroupDO(group))
-        .catch((e) => console.warn('[IM groupStore] 本地群写入失败', e))
+      await getDb().put('groups', buildGroupDO(group))
+    },
+
+    /** 保存单个群 */
+    saveGroup(group: Group | undefined): void {
+      void this.saveGroupRecord(group).catch((e) =>
+        console.warn('[IM groupStore] 本地群写入失败', e)
+      )
     },
 
     /** 从 IndexedDB 恢复指定群成员 */
@@ -137,7 +160,11 @@ export const useGroupStore = defineStore('imGroupStore', {
         return cachedGroup.members
       }
       try {
-        const cached = await getDb().getAllByIndex<GroupMemberDO>('groupMembers', 'groupId', groupId)
+        const cached = await getDb().getAllByIndex<GroupMemberDO>(
+          'groupMembers',
+          'groupId',
+          groupId
+        )
         if (!cached || cached.length === 0) {
           return null
         }
@@ -151,12 +178,14 @@ export const useGroupStore = defineStore('imGroupStore', {
             name: '',
             members: cached,
             memberCount: cached.length,
-            membersLoaded: true
+            membersLoaded: true,
+            membersExpired: this.groupMembersExpired
           })
         } else {
           group.members = cached
           group.memberCount = cached.length
           group.membersLoaded = true
+          group.membersExpired = this.groupMembersExpired
         }
         return cached
       } catch (e) {
@@ -193,23 +222,30 @@ export const useGroupStore = defineStore('imGroupStore', {
       if (this.loaded && !force) {
         return
       }
+      const requestEpoch = storeEpoch
+      const requestUserId = getCurrentUserId()
       // 拉取当前登录用户加入的所有群（不带成员；成员按需再走 fetchGroupMemberList）
       const list = await apiGetMyGroupList()
-      const fresh = (list || []).map(convertGroup)
-      // 合并而非全量替换：silent / groupRemark / 成员缓存这些字段不在 ImGroupRespVO 里，得从旧 group 保留
+      if (requestEpoch !== storeEpoch || getCurrentUserId() !== requestUserId) {
+        return
+      }
+      const fresh = (list || []).map((group) => convertGroup(group))
+      // 合并而非全量替换：成员缓存只在成员列表接口维护，群个人设置以群列表接口为准
       const groupMap = new Map(this.groups.map((group) => [group.id, group]))
       this.groups = fresh.map((group) => {
         const existing = groupMap.get(group.id)
         if (!existing) {
-          return group
+          return { ...group, activeCallExpired: true, infoLoaded: true }
         }
         return {
           ...group,
+          infoLoaded: true,
+          activeCallExpired: existing.activeCallExpired,
+          activeCallLoaded: existing.activeCallLoaded,
           members: existing.members,
           memberCount: existing.memberCount ?? group.memberCount,
-          silent: existing.silent ?? group.silent,
-          groupRemark: existing.groupRemark,
-          membersLoaded: existing.membersLoaded
+          membersLoaded: existing.membersLoaded,
+          membersExpired: existing.membersExpired
         }
       })
       this.loaded = true
@@ -222,16 +258,86 @@ export const useGroupStore = defineStore('imGroupStore', {
         })
       }
       this.saveGroupList()
+      this.preloadMembersForEmptyAvatarGroups()
+    },
+
+    /** 预加载空群头像的成员列表，供 GroupAvatar 异步合成群头像 */
+    preloadMembersForEmptyAvatarGroups() {
+      for (const group of this.groups) {
+        if (
+          group.avatar ||
+          group.joinStatus === CommonStatusEnum.DISABLE ||
+          (group.membersLoaded && !group.membersExpired && group.members?.length)
+        ) {
+          continue
+        }
+        const force = !!group.membersLoaded && !group.membersExpired && !group.members?.length
+        this.fetchGroupMemberList(group.id, force).catch((error) => {
+          console.warn('[IM groupStore] 预加载群头像成员失败', { groupId: group.id }, error)
+        })
+      }
+    },
+
+    /** 失效全部群详情缓存 */
+    markAllGroupInfoExpired() {
+      for (const group of this.groups) {
+        group.infoLoaded = false
+      }
+    },
+
+    /** 失效全部群成员缓存 */
+    markAllGroupMembersExpired() {
+      this.groupMembersExpired = true
+      for (const group of this.groups) {
+        if (group.membersLoaded) {
+          group.membersExpired = true
+        }
+      }
+    },
+
+    /** 失效全部群通话探测缓存 */
+    markAllGroupActiveCallsExpired() {
+      for (const group of this.groups) {
+        group.activeCallExpired = true
+      }
+    },
+
+    /** 标记群通话探测已加载 */
+    markGroupActiveCallLoaded(groupId: number) {
+      const group = this.getGroup(groupId)
+      if (!group) {
+        return
+      }
+      group.activeCallLoaded = true
+      group.activeCallExpired = false
+    },
+
+    /** 判断群通话是否需要重新探测 */
+    isGroupActiveCallExpired(groupId: number): boolean {
+      const group = this.getGroup(groupId)
+      return !group?.activeCallLoaded || !!group.activeCallExpired
+    },
+
+    /** 失效指定群成员缓存 */
+    markGroupMembersExpired(groupId: number) {
+      const group = this.getGroup(groupId)
+      if (group?.membersLoaded) {
+        group.membersExpired = true
+      }
     },
 
     /** 单群刷新：用 /im/group/get 拉一份最新元数据再 upsert，常用于 GROUP_UPDATE 推送后或手动 reload */
-    async fetchGroupInfo(groupId: number) {
+    async fetchGroupInfo(groupId: number, force = false) {
+      const cached = this.getGroup(groupId)
+      if (cached?.infoLoaded && !force) {
+        return
+      }
       try {
         const data = await apiGetGroup(groupId)
         if (!data) {
           return
         }
-        this.upsertGroup(convertGroup(data))
+        this.upsertGroup({ ...convertGroup(data), infoLoaded: true })
       } catch (e) {
         console.warn('[IM groupStore] fetchGroupInfo 失败', e)
       }
@@ -241,7 +347,7 @@ export const useGroupStore = defineStore('imGroupStore', {
     fetchGroupMemberList(groupId: number, force = false): Promise<GroupMember[]> {
       // in-memory "完整"加载过才命中——单成员补齐写入的 partial members 不在此返回（membersLoaded=false）
       const cached = this.getGroup(groupId)
-      if (cached && cached.members && cached.membersLoaded && !force) {
+      if (cached && cached.members && cached.membersLoaded && !cached.membersExpired && !force) {
         return Promise.resolve(cached.members)
       }
       // 未登录：不发起请求也不登记 in-flight，避免污染单飞表
@@ -249,6 +355,7 @@ export const useGroupStore = defineStore('imGroupStore', {
       if (!requestUserId) {
         return Promise.resolve([])
       }
+      const requestEpoch = storeEpoch
       // 同 (userId, groupId) 已经有正在飞的请求：直接复用，避免重复打接口
       const key = pendingMemberKey(requestUserId, groupId)
       const inflight = pendingMemberFetches.get(key)
@@ -258,6 +365,9 @@ export const useGroupStore = defineStore('imGroupStore', {
       const promise = (async () => {
         // 拉接口 + 单 pass 转换：同时捕获 me 的原始 VO，给下面回填 user-per-group 字段（silent / groupRemark）用
         const list = await apiGetGroupMemberList(groupId)
+        if (requestEpoch !== storeEpoch || getCurrentUserId() !== requestUserId) {
+          return []
+        }
         let meRaw: ImGroupMemberRespVO | undefined
         const members = (list || []).map((member) => {
           if (member.userId === requestUserId) {
@@ -282,12 +392,14 @@ export const useGroupStore = defineStore('imGroupStore', {
             memberCount: members.length,
             silent,
             groupRemark,
-            membersLoaded: true
+            membersLoaded: true,
+            membersExpired: false
           })
         } else {
           group.members = members
           group.memberCount = members.length
           group.membersLoaded = true
+          group.membersExpired = false
           // silent / groupRemark 任一变化才同步到 conversation 和 IDB；groupRemark 变化要顺带刷会话名
           if (group.silent !== silent || group.groupRemark !== groupRemark) {
             group.silent = silent
@@ -332,6 +444,7 @@ export const useGroupStore = defineStore('imGroupStore', {
       if (!requestUserId) {
         return Promise.resolve(null)
       }
+      const requestEpoch = storeEpoch
       // 同 (userId, groupId, memberUserId) 已经有正在飞的请求：直接复用
       const key = pendingSingleMemberKey(requestUserId, groupId, memberUserId)
       const inflight = pendingSingleMemberFetches.get(key)
@@ -341,6 +454,9 @@ export const useGroupStore = defineStore('imGroupStore', {
       const promise = (async () => {
         const data = await apiGetGroupMember(groupId, memberUserId)
         if (!data) {
+          return null
+        }
+        if (requestEpoch !== storeEpoch || getCurrentUserId() !== requestUserId) {
           return null
         }
         const member = convertGroupMember(data, groupId)
@@ -373,6 +489,13 @@ export const useGroupStore = defineStore('imGroupStore', {
 
     /** 按 id 插入或合并群（命中则浅合并保留旧字段，未命中则追加），同步把展示名 / 头像 / 免打扰推到对应会话 */
     upsertGroup(group: Group) {
+      void this.upsertGroupAndSave(group).catch((e) =>
+        console.warn('[IM groupStore] 本地群写入失败', e)
+      )
+    },
+
+    /** 按 id 插入或合并群 */
+    async upsertGroupAndSave(group: Group): Promise<void> {
       const index = this.groups.findIndex((g) => g.id === group.id)
       if (index >= 0) {
         this.groups[index] = { ...this.groups[index], ...group }
@@ -388,12 +511,12 @@ export const useGroupStore = defineStore('imGroupStore', {
         silent: merged.silent
       })
       // 持久化到 IDB（fire-and-forget）
-      this.saveGroup(merged)
+      await this.saveGroupRecord(merged)
     },
 
-    /** 本地移除（由 WebSocket GROUP_DEL 事件触发） */
+    /** 本地移除群缓存和群会话；群解散（GROUP_DEL）、退群、被踢都复用 */
     removeGroup(id: number) {
-      // 群解散是硬删（区别于好友删除的软删保留记录）；级联清群聊会话避免列表里留死群
+      // 本地硬删（区别于好友删除的软删保留记录）；级联清群聊会话避免列表里留死群
       this.groups = this.groups.filter((g) => g.id !== id)
       const conversationStore = useConversationStore()
       conversationStore.removeGroupConversation(id)
@@ -517,14 +640,14 @@ export const useGroupStore = defineStore('imGroupStore', {
     /**
      * 接收 GROUP_* 群广播事件，按 type 分发到对应私有 action
      *
-     * WebSocket 实时收 + useMessagePuller 离线 pull 都走 messageStore.insertMessage 旁路调用
+     * WebSocket 实时收走 messageStore.insertMessage 旁路调用
      * store 里没缓存的群静默忽略，等 fetchGroupList 兜底
      */
     applyGroupNotification(groupId: number, type: number, content?: string) {
       if (!groupId) {
         return
       }
-      let payload: GroupNotificationPayload = {}
+      let payload: GroupNotificationPayload
       try {
         payload = content ? JSON.parse(content) : {}
       } catch (error) {
@@ -536,76 +659,87 @@ export const useGroupStore = defineStore('imGroupStore', {
         return
       }
       switch (type) {
-        case ImMessageType.GROUP_CREATE:
+        case ImContentType.GROUP_CREATE:
           this.applyGroupCreateNotification(groupId, payload)
           break
-        case ImMessageType.GROUP_NAME_UPDATE:
+        case ImContentType.GROUP_NAME_UPDATE:
           this.applyGroupNameUpdateNotification(groupId, payload)
           break
-        case ImMessageType.GROUP_NOTICE_UPDATE:
+        case ImContentType.GROUP_NOTICE_UPDATE:
           this.applyGroupNoticeUpdateNotification(groupId, payload)
           break
-        case ImMessageType.GROUP_INFO_UPDATE:
+        case ImContentType.GROUP_INFO_UPDATE:
           this.applyGroupInfoUpdateNotification(groupId, payload)
           break
-        case ImMessageType.GROUP_DISSOLVE:
+        case ImContentType.GROUP_DISSOLVE:
           this.removeGroup(groupId)
           break
-        case ImMessageType.GROUP_MEMBER_INVITE:
+        case ImContentType.GROUP_MEMBER_INVITE:
           this.applyGroupMemberInviteNotification(groupId, payload)
           break
-        case ImMessageType.GROUP_MEMBER_ENTER:
+        case ImContentType.GROUP_MEMBER_ENTER:
           this.applyGroupMemberEnterNotification(groupId, payload)
           break
-        case ImMessageType.GROUP_MEMBER_QUIT:
+        case ImContentType.GROUP_MEMBER_QUIT:
           this.applyGroupMemberQuitNotification(groupId, payload)
           break
-        case ImMessageType.GROUP_MEMBER_KICK:
+        case ImContentType.GROUP_MEMBER_KICK:
           this.applyGroupMemberKickNotification(groupId, payload)
           break
-        case ImMessageType.GROUP_MEMBER_NICKNAME_UPDATE:
+        case ImContentType.GROUP_MEMBER_NICKNAME_UPDATE:
           this.applyGroupMemberNicknameUpdateNotification(groupId, payload)
           break
-        case ImMessageType.GROUP_ADMIN_ADD:
-          this.updateGroupMemberRoleList(groupId, payload.memberUserIds || [], ImGroupMemberRole.ADMIN)
+        case ImContentType.GROUP_ADMIN_ADD:
+          this.updateGroupMemberRoleList(
+            groupId,
+            payload.memberUserIds || [],
+            ImGroupMemberRole.ADMIN
+          )
+          this.markGroupMembersExpired(groupId)
           // 自己被加为管理员，原本看不到的群下未处理申请现在变可见，重新拉一次 unhandledList
           if (isSelfInPayloadMembers(payload)) {
-            useGroupRequestStore()
-              .fetchUnhandledGroupRequestList()
-              .catch(() => undefined)
+            refreshUnhandledGroupRequests()
           }
           break
-        case ImMessageType.GROUP_ADMIN_REMOVE:
-          this.updateGroupMemberRoleList(groupId, payload.memberUserIds || [], ImGroupMemberRole.NORMAL)
+        case ImContentType.GROUP_ADMIN_REMOVE:
+          this.updateGroupMemberRoleList(
+            groupId,
+            payload.memberUserIds || [],
+            ImGroupMemberRole.NORMAL
+          )
+          this.markGroupMembersExpired(groupId)
+          if (isSelfInPayloadMembers(payload)) {
+            refreshUnhandledGroupRequests()
+          }
           break
-        case ImMessageType.GROUP_OWNER_TRANSFER:
+        case ImContentType.GROUP_OWNER_TRANSFER:
           this.applyGroupOwnerTransferNotification(groupId, payload)
           break
-        case ImMessageType.GROUP_MESSAGE_PIN:
+        case ImContentType.GROUP_MESSAGE_PIN:
           this.applyGroupMessagePinNotification(groupId, payload)
           break
-        case ImMessageType.GROUP_MESSAGE_UNPIN:
+        case ImContentType.GROUP_MESSAGE_UNPIN:
           this.applyGroupMessageUnpinNotification(groupId, payload)
           break
-        case ImMessageType.GROUP_MEMBER_MUTED:
+        case ImContentType.GROUP_MEMBER_MUTED:
           this.applyGroupMemberMutedNotification(groupId, payload)
           break
-        case ImMessageType.GROUP_MEMBER_CANCEL_MUTED:
+        case ImContentType.GROUP_MEMBER_CANCEL_MUTED:
           this.applyGroupMemberCancelMutedNotification(groupId, payload)
           break
-        case ImMessageType.GROUP_MUTED:
+        case ImContentType.GROUP_MUTED:
           this.updateGroupFields(groupId, { mutedAll: true })
           break
-        case ImMessageType.GROUP_CANCEL_MUTED:
+        case ImContentType.GROUP_CANCEL_MUTED:
           this.updateGroupFields(groupId, { mutedAll: false })
           break
-        case ImMessageType.GROUP_BANNED:
+        case ImContentType.GROUP_BANNED:
           this.updateGroupFields(groupId, { banned: !!payload.banned })
           break
       }
     },
 
-    /** 创建群广播：创建者多端同步 + 初始成员首次拉取；payload.memberUserIds 含自己 → 拉群详情 / 成员；本端发起者已经 upsert 过本群，跳过避免双拉 */
+    /** 创建群广播：群未就位时拉群详情 */
     async applyGroupCreateNotification(groupId: number, payload: GroupNotificationPayload) {
       if (!isSelfInPayloadMembers(payload)) {
         return
@@ -615,9 +749,7 @@ export const useGroupStore = defineStore('imGroupStore', {
       if (selfIsOperator && this.getGroup(groupId)) {
         return
       }
-      // 先 await fetchGroupInfo 把群 upsert 进 state.groups；否则 fetchGroupMemberList 的「不是我加入的群」guard 会兜空
-      await this.fetchGroupInfo(groupId)
-      this.fetchGroupMemberList(groupId, true).catch(() => undefined)
+      await this.fetchGroupInfo(groupId, true)
     },
 
     /** 群名变更：按 newName 局部更新本地群名 */
@@ -632,11 +764,14 @@ export const useGroupStore = defineStore('imGroupStore', {
       this.updateGroupFields(groupId, { notice: payload.newNotice ?? '' })
     },
 
-    /** 群信息变更（NAME / NOTICE 之外字段，当前承载头像变更） */
+    /** 群信息变更：同步头像、进群审批 */
     applyGroupInfoUpdateNotification(groupId: number, payload: GroupNotificationPayload) {
       const fields: Partial<Group> = {}
       if (payload.newAvatar) {
         fields.avatar = payload.newAvatar
+      }
+      if (payload.newJoinApproval != null) {
+        fields.joinApproval = payload.newJoinApproval
       }
       if (Object.keys(fields).length > 0) {
         this.updateGroupFields(groupId, fields)
@@ -647,8 +782,9 @@ export const useGroupStore = defineStore('imGroupStore', {
     async applyGroupMemberInviteNotification(groupId: number, payload: GroupNotificationPayload) {
       // 自己刚被拉进来：必须 await fetchGroupInfo 让群入 state.groups，否则 fetchGroupMemberList 的 guard 会兜空
       if (isSelfInPayloadMembers(payload) && !this.getGroup(groupId)) {
-        await this.fetchGroupInfo(groupId)
+        await this.fetchGroupInfo(groupId, true)
       }
+      this.markGroupMembersExpired(groupId)
       this.fetchGroupMemberList(groupId, true).catch(() => undefined)
     },
 
@@ -657,8 +793,9 @@ export const useGroupStore = defineStore('imGroupStore', {
       const selfUserId = getCurrentUserId()
       // 自己自由进群：必须 await fetchGroupInfo 让群入 state.groups，否则 fetchGroupMemberList 的 guard 会兜空
       if (selfUserId && payload.entrantUserId === selfUserId && !this.getGroup(groupId)) {
-        await this.fetchGroupInfo(groupId)
+        await this.fetchGroupInfo(groupId, true)
       }
+      this.markGroupMembersExpired(groupId)
       this.fetchGroupMemberList(groupId, true).catch(() => undefined)
     },
 
@@ -670,6 +807,7 @@ export const useGroupStore = defineStore('imGroupStore', {
         this.removeGroup(groupId)
       } else if (payload.operatorUserId) {
         this.removeLocalGroupMemberList(groupId, [payload.operatorUserId])
+        this.markGroupMembersExpired(groupId)
       }
     },
 
@@ -684,6 +822,7 @@ export const useGroupStore = defineStore('imGroupStore', {
         this.removeGroup(groupId)
       } else if (memberIds.length) {
         this.removeLocalGroupMemberList(groupId, memberIds)
+        this.markGroupMembersExpired(groupId)
       }
     },
 
@@ -695,6 +834,7 @@ export const useGroupStore = defineStore('imGroupStore', {
           payload.operatorUserId,
           payload.displayUserName ?? ''
         )
+        this.markGroupMembersExpired(groupId)
       }
     },
 
@@ -702,13 +842,14 @@ export const useGroupStore = defineStore('imGroupStore', {
     applyGroupOwnerTransferNotification(groupId: number, payload: GroupNotificationPayload) {
       if (payload.operatorUserId && payload.newOwnerUserId) {
         this.transferGroupOwner(groupId, payload.operatorUserId, payload.newOwnerUserId)
+        this.markGroupMembersExpired(groupId)
       }
       // 自己接管群主：原本看不到的群下未处理申请现在变可见，重新拉一次 unhandledList
       const selfUserId = getCurrentUserId()
       if (selfUserId && payload.newOwnerUserId === selfUserId) {
-        useGroupRequestStore()
-          .fetchUnhandledGroupRequestList()
-          .catch(() => undefined)
+        refreshUnhandledGroupRequests()
+      } else if (selfUserId && payload.operatorUserId === selfUserId) {
+        refreshUnhandledGroupRequests()
       }
     },
 
@@ -735,7 +876,7 @@ export const useGroupStore = defineStore('imGroupStore', {
           senderId: message.senderId,
           type: message.type,
           content: message.content,
-          status: ImMessageStatus.UNREAD,
+          status: ImMessageStatus.NORMAL,
           sendTime: new Date(message.sendTime).getTime(),
           targetId: message.groupId || groupId,
           selfSend: message.senderId === getCurrentUserId(),
@@ -770,6 +911,7 @@ export const useGroupStore = defineStore('imGroupStore', {
       if (member && payload.muteEndTime) {
         member.muteEndTime = payload.muteEndTime
         this.saveGroupMemberList(groupId)
+        this.markGroupMembersExpired(groupId)
       }
     },
 
@@ -780,6 +922,7 @@ export const useGroupStore = defineStore('imGroupStore', {
       if (member) {
         member.muteEndTime = undefined
         this.saveGroupMemberList(groupId)
+        this.markGroupMembersExpired(groupId)
       }
     },
 
@@ -787,6 +930,9 @@ export const useGroupStore = defineStore('imGroupStore', {
     clear() {
       this.groups = []
       this.loaded = false
+      this.groupMembersExpired = false
+      // 账号切换：递增 epoch 废弃旧账号 in-flight 的成员请求
+      storeEpoch++
       // 单飞表跟 in-memory state 一起重置；旧账号 in-flight 的请求 finally 也会自己 delete key，提前清空只是更干脆
       pendingMemberFetches.clear()
       pendingSingleMemberFetches.clear()
@@ -801,10 +947,13 @@ function convertGroup(group: ImGroupRespVO): Group {
     avatar: group.avatar,
     notice: group.notice,
     ownerUserId: group.ownerUserId,
-    pinnedMessages: group.pinnedMessages?.map(convertGroupMessageVO),
+    pinnedMessages: group.pinnedMessages?.map((message) => convertGroupMessageVO(message)),
     mutedAll: group.mutedAll,
     banned: group.banned,
-    joinApproval: group.joinApproval
+    joinApproval: group.joinApproval,
+    joinStatus: group.joinStatus,
+    groupRemark: group.groupRemark,
+    silent: group.silent
   }
 }
 

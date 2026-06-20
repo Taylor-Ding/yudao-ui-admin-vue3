@@ -3,14 +3,44 @@ import { debounce } from 'lodash-es'
 import { store } from '@/store'
 
 import { CONVERSATION_RECENT_FORWARD_MAX } from '../../utils/config'
-import { ImConversationType } from '../../utils/constants'
+import {
+  ImConversationType,
+  ImMessageReceiptStatus,
+  ImMessageStatus,
+  isNormalMessage
+} from '../../utils/constants'
 import { getClientConversationId, getDb, StorageKeys, type DbTransaction } from '../../utils/db'
+import { runIncrementalPull } from '../../utils/pull'
 import { getCurrentUserId } from '@/utils/auth'
 import { useMessageStore } from './messageStore'
-import type { Conversation, ConversationDO } from '../types'
+import {
+  pullMyConversationReadList as apiPullMyConversationReadList,
+  type ImConversationReadRespVO
+} from '@/api/im/conversation/read'
+import type {
+  Conversation,
+  ConversationDO,
+  ConversationRead,
+  ConversationReadDO,
+  MessageDO
+} from '../types'
 
 const PERSIST_DRAFT_DEBOUNCE_MS = 500
 const pendingDraftConversations = new Set<Conversation>()
+
+/** 创建会话读位置记录 */
+function createConversationRead(
+  type: number,
+  targetId: number,
+  messageId: number
+): ConversationRead {
+  return {
+    conversationType: type,
+    targetId,
+    messageId,
+    updateTime: Date.now()
+  }
+}
 
 /** 会话转 IndexedDB 记录 */
 function toConversationDO(conversation: Conversation): ConversationDO {
@@ -31,6 +61,7 @@ function toConversationDO(conversation: Conversation): ConversationDO {
     lastReceiptStatus: conversation.lastReceiptStatus,
     lastSelfSend: conversation.lastSelfSend,
     lastSenderDisplayName: conversation.lastSenderDisplayName,
+    reportedReadMessageId: conversation.reportedReadMessageId,
     deleted: conversation.deleted,
     top: conversation.top,
     silent: conversation.silent,
@@ -43,13 +74,57 @@ function toConversationDO(conversation: Conversation): ConversationDO {
 
 /** IndexedDB 记录转会话 */
 function fromConversationDO(conversation: ConversationDO): Conversation {
-  const { clientConversationId: _clientConversationId, ...rest } = conversation
+  const {
+    clientConversationId: _clientConversationId,
+    ...rest
+  } = conversation
   return rest
+}
+
+/** 会话读位置转 IndexedDB 记录 */
+function toConversationReadDO(record: ConversationRead): ConversationReadDO {
+  return {
+    conversationType: record.conversationType,
+    targetId: record.targetId,
+    messageId: record.messageId,
+    updateTime: record.updateTime,
+    clientConversationId: getClientConversationId(record.conversationType, record.targetId)
+  }
+}
+
+/** IndexedDB 记录转会话读位置 */
+function fromConversationReadDO(record: ConversationReadDO): ConversationRead {
+  const { clientConversationId: _clientConversationId, ...rest } = record
+  return rest
+}
+
+/** 是否为有效会话读位置 */
+function isValidConversationReadRecord(record: ImConversationReadRespVO): boolean {
+  return !!record.conversationType && !!record.targetId && !!record.messageId
+}
+
+/** 获取对方普通消息最大编号 */
+function getMaxIncomingNormalMessageId(
+  messages: Array<Pick<MessageDO, 'id' | 'selfSend' | 'type' | 'status'>>
+): number {
+  return messages.reduce((maxMessageId, message) => {
+    if (
+      message.id &&
+      !message.selfSend &&
+      isNormalMessage(message.type) &&
+      message.status !== ImMessageStatus.RECALL &&
+      message.id > maxMessageId
+    ) {
+      return message.id
+    }
+    return maxMessageId
+  }, 0)
 }
 
 export const useConversationStore = defineStore('imConversationStore', {
   state: () => ({
     conversations: [] as Conversation[], // 全量会话列表（私聊 + 群聊 + 频道）
+    conversationReads: {} as Record<string, ConversationRead>, // 会话读位置
     activeConversation: null as Conversation | null, // 当前激活的会话
     loading: false, // 是否正在批量加载
     recentForwardConversationKeys: [] as string[] // 最近转发会话 key 列表
@@ -83,7 +158,13 @@ export const useConversationStore = defineStore('imConversationStore', {
       (type: number, targetId: number): Conversation | undefined =>
         state.conversations.find(
           (conversation) => conversation.type === type && conversation.targetId === targetId
-        )
+        ),
+
+    /** 查找会话读位置 */
+    getConversationRead:
+      (state) =>
+      (type: number, targetId: number): ConversationRead | undefined =>
+        state.conversationReads[getClientConversationId(type, targetId)]
   },
 
   actions: {
@@ -101,11 +182,20 @@ export const useConversationStore = defineStore('imConversationStore', {
       this.clear()
       // 2. 从 IndexedDB 读取会话和轻量设置
       const db = getDb()
-      const [conversations, recent] = await Promise.all([
+      const [conversations, conversationReads, recent] = await Promise.all([
         db.getAll<ConversationDO>('conversations'),
+        db.getAll<ConversationReadDO>('conversationReads'),
         db.getSetting<string[]>(StorageKeys.settings.recentForwardConversationKeys)
       ])
-      this.conversations = conversations.map(fromConversationDO)
+      const nextConversationReads: Record<string, ConversationRead> = {}
+      for (const record of conversationReads) {
+        const item = fromConversationReadDO(record)
+        nextConversationReads[getClientConversationId(item.conversationType, item.targetId)] = item
+      }
+      const nextConversations = conversations.map(fromConversationDO)
+      this.conversationReads = nextConversationReads
+      await this.applyLocalConversationReads(nextConversations)
+      this.conversations = nextConversations
       if (Array.isArray(recent)) {
         this.recentForwardConversationKeys = recent.slice(0, CONVERSATION_RECENT_FORWARD_MAX)
       }
@@ -126,8 +216,259 @@ export const useConversationStore = defineStore('imConversationStore', {
       saveDraftConversationListDebounced.cancel()
       pendingDraftConversations.clear()
       this.conversations = []
+      this.conversationReads = {}
       this.activeConversation = null
       this.recentForwardConversationKeys = []
+    },
+
+    /** 持久化会话读位置 */
+    async saveConversationReadRecord(
+      target: ConversationRead | ConversationRead[] | null | undefined,
+      tx?: DbTransaction
+    ): Promise<void> {
+      const records = (Array.isArray(target) ? target : target ? [target] : []).map(
+        toConversationReadDO
+      )
+      if (records.length === 0) {
+        return
+      }
+      const db = getDb()
+      if (tx) {
+        for (const record of records) {
+          await db.put('conversationReads', record, tx)
+        }
+        return
+      }
+      await db.transaction(['conversationReads'], 'readwrite', async (tx) => {
+        for (const record of records) {
+          await db.put('conversationReads', record, tx)
+        }
+      })
+    },
+
+    /** 应用本地会话读位置 */
+    async applyLocalConversationReads(conversations?: Conversation[]) {
+      const targetConversations = conversations || this.conversations
+      const changedConversations: Conversation[] = []
+      for (const conversation of targetConversations) {
+        const record = this.getConversationRead(conversation.type, conversation.targetId)
+        if (!record) {
+          continue
+        }
+        if (this.applyReadToConversation(conversation, record.messageId)) {
+          changedConversations.push(conversation)
+          continue
+        }
+        if (conversation.unreadCount === 0 && !conversation.atMe && !conversation.atAll) {
+          continue
+        }
+        const messages = await getDb().getAllByIndex<MessageDO>(
+          'messages',
+          'clientConversationId',
+          getClientConversationId(conversation.type, conversation.targetId)
+        )
+        const maxIncomingMessageId = getMaxIncomingNormalMessageId(messages)
+        if (maxIncomingMessageId > 0 && maxIncomingMessageId <= record.messageId) {
+          conversation.unreadCount = 0
+          conversation.atMe = false
+          conversation.atAll = false
+          changedConversations.push(conversation)
+        }
+      }
+      if (changedConversations.length > 0) {
+        await this.saveConversationRecord(changedConversations)
+      }
+    },
+
+    /** 判断消息是否已被会话读位置覆盖 */
+    isMessageCoveredByReadPosition(
+      conversation: Pick<Conversation, 'type' | 'targetId'>,
+      message?: { id?: number } | null
+    ): boolean {
+      if (!message?.id) {
+        return false
+      }
+      const record = this.getConversationRead(conversation.type, conversation.targetId)
+      return !!record && message.id <= record.messageId
+    },
+
+    /** 判断会话读位置是否覆盖消息编号 */
+    isReadPositionCovered(type: number, targetId: number, messageId?: number): boolean {
+      if (!messageId) {
+        return false
+      }
+      const record = this.getConversationRead(type, targetId)
+      return !!record && record.messageId >= messageId
+    },
+
+    /** 判断服务端已读位置是否覆盖消息编号 */
+    isReportedReadPositionCovered(type: number, targetId: number, messageId?: number): boolean {
+      if (!messageId) {
+        return false
+      }
+      const conversation = this.getConversation(type, targetId)
+      return (conversation?.reportedReadMessageId || 0) >= messageId
+    },
+
+    /** 应用读位置到会话 */
+    applyReadToConversation(conversation: Conversation, messageId: number): boolean {
+      if (!conversation.lastMessageId || conversation.lastMessageId > messageId) {
+        return false
+      }
+      if (conversation.unreadCount === 0 && !conversation.atMe && !conversation.atAll) {
+        return false
+      }
+      conversation.unreadCount = 0
+      conversation.atMe = false
+      conversation.atAll = false
+      return true
+    },
+
+    /** 应用会话读位置 */
+    async applyConversationReadList(
+      records: ImConversationReadRespVO[],
+      isActive?: () => boolean
+    ): Promise<void> {
+      if (records.length === 0) {
+        return
+      }
+      const changedReads = new Map<string, ConversationRead>()
+      const changedConversations = new Map<string, Conversation>()
+      const changedMessages = new Map<string, MessageDO>()
+      const db = getDb()
+      const messageStore = useMessageStore()
+
+      // 1. 按读位置更新会话未读和频道已读态
+      for (const record of records) {
+        if (isActive && !isActive()) {
+          return
+        }
+        if (!isValidConversationReadRecord(record)) {
+          continue
+        }
+        const clientConversationId = getClientConversationId(
+          record.conversationType,
+          record.targetId
+        )
+        let storedMessages: MessageDO[] | undefined
+        const getStoredMessages = async () => {
+          if (!storedMessages) {
+            storedMessages = await db.getAllByIndex<MessageDO>(
+              'messages',
+              'clientConversationId',
+              clientConversationId
+            )
+          }
+          return storedMessages
+        }
+        const current = this.conversationReads[clientConversationId]
+        const messageId = Math.max(record.messageId, current?.messageId || 0)
+        const conversation = this.getConversation(record.conversationType, record.targetId)
+        if (
+          conversation &&
+          record.messageId > (conversation.reportedReadMessageId || 0)
+        ) {
+          conversation.reportedReadMessageId = record.messageId
+          changedConversations.set(clientConversationId, conversation)
+        }
+        if (!current || messageId > current.messageId) {
+          const next = {
+            conversationType: record.conversationType,
+            targetId: record.targetId,
+            messageId,
+            updateTime: record.updateTime
+          }
+          this.conversationReads[clientConversationId] = next
+          changedReads.set(clientConversationId, next)
+        }
+
+        if (conversation && this.applyReadToConversation(conversation, messageId)) {
+          changedConversations.set(clientConversationId, conversation)
+        } else if (conversation) {
+          const maxIncomingMessageId = getMaxIncomingNormalMessageId(await getStoredMessages())
+          if (maxIncomingMessageId > 0 && maxIncomingMessageId <= messageId) {
+            conversation.unreadCount = 0
+            conversation.atMe = false
+            conversation.atAll = false
+            changedConversations.set(clientConversationId, conversation)
+          }
+        }
+        if (record.conversationType !== ImConversationType.CHANNEL) {
+          continue
+        }
+        const memoryMessages = messageStore.getMessages(clientConversationId)
+        for (const message of memoryMessages) {
+          if (
+            message.id &&
+            message.id <= messageId &&
+            message.receiptStatus !== ImMessageReceiptStatus.DONE
+          ) {
+            message.receiptStatus = ImMessageReceiptStatus.DONE
+          }
+        }
+        for (const message of await getStoredMessages()) {
+          if (
+            message.id &&
+            message.id <= messageId &&
+            message.receiptStatus !== ImMessageReceiptStatus.DONE
+          ) {
+            message.receiptStatus = ImMessageReceiptStatus.DONE
+            changedMessages.set(message.messageKey, message)
+          }
+        }
+      }
+
+      // 2. 持久化本轮变更
+      if (
+        changedReads.size === 0 &&
+        changedConversations.size === 0 &&
+        changedMessages.size === 0
+      ) {
+        return
+      }
+      if (isActive && !isActive()) {
+        return
+      }
+      const stores: Array<'conversationReads' | 'conversations' | 'messages'> = []
+      if (changedReads.size > 0) {
+        stores.push('conversationReads')
+      }
+      if (changedConversations.size > 0) {
+        stores.push('conversations')
+      }
+      if (changedMessages.size > 0) {
+        stores.push('messages')
+      }
+      await db.transaction(stores, 'readwrite', async (tx) => {
+        if (changedReads.size > 0) {
+          await this.saveConversationReadRecord([...changedReads.values()], tx)
+        }
+        if (changedConversations.size > 0) {
+          await this.saveConversationRecord([...changedConversations.values()], tx)
+        }
+        for (const message of changedMessages.values()) {
+          await db.put('messages', message, tx)
+        }
+      })
+    },
+
+    /** 增量拉取会话读位置 */
+    async pullConversationReads(isActive?: () => boolean): Promise<void> {
+      await runIncrementalPull(
+        StorageKeys.settings.conversationReadPullCursor,
+        apiPullMyConversationReadList,
+        async (records) => {
+          if (isActive && !isActive()) {
+            return false
+          }
+          await this.applyConversationReadList(records, isActive)
+          if (isActive && !isActive()) {
+            return false
+          }
+          return true
+        },
+        isActive
+      )
     },
 
     /** 执行会话记录持久化 */
@@ -245,11 +586,7 @@ export const useConversationStore = defineStore('imConversationStore', {
       if (!conversation) {
         return
       }
-      // 1. 清理会话级未读状态
-      conversation.unreadCount = 0
-      conversation.atMe = false
-      conversation.atAll = false
-      // 2. 懒加载消息并保存会话摘要
+      // 懒加载消息并保存会话摘要
       void useMessageStore().ensureConversationMessageListLoaded(conversation)
       this.saveConversation(conversation)
     },
@@ -326,17 +663,60 @@ export const useConversationStore = defineStore('imConversationStore', {
     },
 
     /** 标记会话已读 */
-    markConversationRead(type: number, targetId: number) {
+    markConversationRead(type: number, targetId: number, messageId?: number): void {
       const conversation = this.getConversation(type, targetId)
       if (!conversation) {
         return
       }
-      if (conversation.unreadCount === 0 && !conversation.atMe && !conversation.atAll) {
+      const key = getClientConversationId(type, targetId)
+      const current = this.conversationReads[key]
+      const readMessageIdAdvanced = !!messageId && messageId > (current?.messageId || 0)
+      if (
+        conversation.unreadCount === 0 &&
+        !conversation.atMe &&
+        !conversation.atAll &&
+        !readMessageIdAdvanced
+      ) {
         return
       }
       conversation.unreadCount = 0
       conversation.atMe = false
       conversation.atAll = false
+      if (readMessageIdAdvanced) {
+        const record = createConversationRead(type, targetId, messageId)
+        this.conversationReads[key] = record
+        void getDb()
+          .transaction(['conversations', 'conversationReads'], 'readwrite', async (tx) => {
+            await this.saveConversationRecord(conversation, tx)
+            await this.saveConversationReadRecord(record, tx)
+          })
+          .catch((e) =>
+            console.warn(
+              '[IM conversationStore] 会话已读写入失败',
+              {
+                conversationType: type,
+                targetId,
+                messageId,
+                conversationKey: key
+              },
+              e
+            )
+        )
+        return
+      }
+      this.saveConversation(conversation)
+    },
+
+    /** 标记会话已上报服务端读位置 */
+    markConversationReadReported(type: number, targetId: number, messageId?: number): void {
+      if (!messageId) {
+        return
+      }
+      const conversation = this.getConversation(type, targetId)
+      if (!conversation || messageId <= (conversation.reportedReadMessageId || 0)) {
+        return
+      }
+      conversation.reportedReadMessageId = messageId
       this.saveConversation(conversation)
     },
 

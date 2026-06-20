@@ -12,7 +12,7 @@
       - 切 Tab 不重建组件，MessagePanel 滚动位置、输入框草稿等 UI 状态不丢
       - Vue 3 里 keep-alive 不能直接包 <router-view>（会有警告），必须走 v-slot 拿 Component
     -->
-    <router-view v-slot="{ Component }">
+    <router-view v-if="childRouteReady" v-slot="{ Component }">
       <keep-alive>
         <component :is="Component" />
       </keep-alive>
@@ -29,7 +29,7 @@
 </template>
 
 <script lang="ts" setup>
-import { onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { onMounted, onUnmounted, ref, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { useAppStore } from '@/store/modules/app'
@@ -41,6 +41,7 @@ import { useGroupStore } from './store/groupStore'
 import { useGroupRequestStore } from './store/groupRequestStore'
 import { useFaceStore } from './store/faceStore'
 import { useChannelStore } from './store/channelStore'
+import { useRtcStore } from './store/rtcStore'
 import { useMessagePuller } from './composables/useMessagePuller'
 import { useMessageSender } from './composables/useMessageSender'
 import { useVoicePlayer } from './composables/useVoicePlayer'
@@ -65,9 +66,11 @@ const groupStore = useGroupStore()
 const groupRequestStore = useGroupRequestStore()
 const faceStore = useFaceStore()
 const channelStore = useChannelStore()
+const rtcStore = useRtcStore()
 const { pullOnce, cancelPull } = useMessagePuller()
 const { readActive, syncPrivateReadStatus } = useMessageSender()
 const voicePlayer = useVoicePlayer()
+const childRouteReady = ref(false) // 子路由是否允许挂载
 
 /** 初始化：先吃本地缓存让首屏立即渲染，再远端刷新最新数据，最后建实时通信拉离线消息 */
 onMounted(async () => {
@@ -79,7 +82,7 @@ onMounted(async () => {
     // 1.2 打开当前用户 IM DB
     await initDb()
     // 1.3 多个 store 并发从 IDB 读取本地缓存
-    const [, , hasCachedFriends, hasCachedGroups, hasCachedChannels] = await Promise.all([
+    const [, , hasFriendRows, hasGroupRows, hasChannelRows] = await Promise.all([
       conversationStore.loadConversationList(),
       messageStore.loadMessageCursorList(),
       friendStore.loadFriendData(),
@@ -87,39 +90,56 @@ onMounted(async () => {
       channelStore.loadChannelList(),
       groupRequestStore.loadGroupRequestList()
     ])
-    // 1.4 我管理的群下未处理加群申请后台刷新
+    childRouteReady.value = true
+    groupStore.markAllGroupActiveCallsExpired()
+    groupStore.markAllGroupMembersExpired()
+    // 1.4 我管理的群下未处理加群申请红点：首登用 unhandled-list（服务端直接过滤未处理，语义精准、启动轻）；
+    //     pullGroupRequests 只在重连 / 后续补偿时跑（见 useMessagePuller.pullStateEvents），不进首登主链路
     void groupRequestStore
       .fetchUnhandledGroupRequestList()
       .catch((e) => console.warn('[IM] 拉取未处理加群申请失败', e))
 
-    // 2.1 有缓存：异步背景刷新，失败仅记日志（IDB 数据已经够撑首屏，pullOnce 也能正常入库）
+    // 2. 好友主数据恢复走 pull；群列表用快照刷新，覆盖离线期间自己的入群 / 退群状态变化
+    // 2.1 有缓存：异步背景增量刷新，失败仅记日志（IDB 数据已经够撑首屏，pullOnce 也能正常入库）
     // 2.2 无缓存（首登 / 切账号回切）：必须 await + 失败抛出中断本轮 onMounted，
-    //     否则 pullOnce 会用 senderId 数字给会话起名落到 IDB 后续基本无法自愈；无缓存分支两个 fetch 并发 Promise.all 省一个 RTT
+    //     否则 pullOnce 会用 senderId 数字给会话起名落到 IDB 后续基本无法自愈；无缓存分支并发 Promise.all 省一个 RTT
     const requiredFetches: Promise<unknown>[] = []
-    if (hasCachedFriends) {
-      void friendStore.fetchFriendList().catch((e) => console.warn('[IM] 后台刷好友失败', e))
+    if (hasFriendRows) {
+      void friendStore.pullFriends().catch((e) => console.warn('[IM] 后台增量拉好友失败', e))
     } else {
-      requiredFetches.push(friendStore.fetchFriendList())
+      requiredFetches.push(friendStore.pullFriends())
     }
-    if (hasCachedGroups) {
-      void groupStore.fetchGroupList().catch((e) => console.warn('[IM] 后台刷群列表失败', e))
+    if (hasGroupRows) {
+      void groupStore.fetchGroupList(true).catch((e) => console.warn('[IM] 后台刷新群列表失败', e))
     } else {
-      requiredFetches.push(groupStore.fetchGroupList())
+      requiredFetches.push(groupStore.fetchGroupList(true))
     }
-    if (hasCachedChannels) {
+    // 2.3 频道无增量 pull 接口，继续走 list
+    if (hasChannelRows) {
       void channelStore.fetchChannelList().catch((e) => console.warn('[IM] 后台刷频道列表失败', e))
     } else {
       requiredFetches.push(channelStore.fetchChannelList())
     }
+    // 2.4 执行加载
     if (requiredFetches.length > 0) {
       await Promise.all(requiredFetches)
     }
 
-    // 3. 实时通信：建 WebSocket 长连接 + 拉离线消息（pullOnce finally 把 loading 归位）
+    // 2.5 好友申请增量补偿：首登也要跑，离线期间好友申请变更不会影响好友主表
+    void friendStore
+      .pullFriendRequests()
+      .catch((e) => console.warn('[IM] 后台增量拉好友申请失败', e))
+
+    // 3. 会话读位置先补偿，消息入库时可直接过滤已读历史消息
+    await conversationStore
+      .pullConversationReads()
+      .catch((e) => console.warn('[IM] 拉取会话读位置失败', e))
+
+    // 4. 实时通信：建 WebSocket 长连接 + 拉离线消息（pullOnce finally 把 loading 归位）
     webSocketStore.connect()
     await pullOnce()
 
-    // 4. 默认选中第一个会话；若置顶分组处于折叠态，需跳过被折叠隐藏的置顶项，避免自动展开折叠
+    // 5. 默认选中第一个会话；若置顶分组处于折叠态，需跳过被折叠隐藏的置顶项，避免自动展开折叠
     const sorted = conversationStore.getSortedConversationList
     const firstVisible = pickFirstVisibleConversation(sorted)
     if (firstVisible && !conversationStore.activeConversation) {
@@ -156,10 +176,12 @@ function onBeforeUnload() {
 }
 window.addEventListener('beforeunload', onBeforeUnload)
 
-/** 离开 IM 主壳：取消在飞的 pull + 主动断 WebSocket + flush 草稿 + 清空表情缓存 + 解绑 unload + 停语音 */
+/** 离开 IM 主壳：取消 pull、断开 WebSocket、清理 RTC、保存草稿、停止语音、解绑 unload，并结束当前 IM session */
 onUnmounted(() => {
   cancelPull()
   webSocketStore.disconnect()
+  rtcStore.reset()
+  rtcStore.clearGroupCallCache()
   conversationStore.flushConversationDraftSave()
   faceStore.clear()
   // 模块级单例 audio 不会随视图卸载自动停，主动停掉避免切路由后语音继续响

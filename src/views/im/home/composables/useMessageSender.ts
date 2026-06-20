@@ -19,7 +19,7 @@ import {
   type QuoteMessage,
   type TextMessage
 } from '../../utils/message'
-import { ImMessageType, ImMessageStatus, ImConversationType } from '../../utils/constants'
+import { ImContentType, ImMessageStatus, ImConversationType } from '../../utils/constants'
 import { MESSAGE_PRIVATE_READ_ENABLED, MESSAGE_GROUP_READ_ENABLED } from '../../utils/config'
 import { getClientConversationId } from '../../utils/db'
 import type { Conversation, Message } from '../types'
@@ -53,9 +53,9 @@ interface SendExtOptions {
  *
  * 设计要点：
  * 1. 私聊 / 群聊接口签名对称，按 conversation.type 分支调度，差异在分支内部消化
- * 2. 发送走「乐观更新」：先 insertMessage 写入 SENDING 占位，请求成功 ackMessage 更新为 UNREAD，失败更新为 FAILED
+ * 2. 发送走「乐观更新」：先 insertMessage 写入 SENDING 占位，请求成功 ackMessage 更新为 NORMAL，失败更新为 FAILED
  * 3. 撤回不做乐观更新：服务端通过 WebSocket RECALL 事件回传，由 websocketStore 统一更新状态，避免网络失败后不可回退
- * 4. 已读上报：本端立刻清未读数；服务端回包成功后再做持久化
+ * 4. 已读上报：本端立刻清未读数并记录本地读位置；接口失败仅记录日志
  */
 export const useMessageSender = () => {
   const conversationStore = useConversationStore()
@@ -131,10 +131,10 @@ export const useMessageSender = () => {
         name: conversation.name || String(realTarget),
         avatar: conversation.avatar || ''
       }
-      messageStore.insertMessage(conversationInfo, message)
+      void messageStore.insertMessage(conversationInfo, message).catch(() => undefined)
     }
 
-    // 3. 发送请求：按会话类型分发到不同接口；成功后 ackMessage 更新为 UNREAD，失败更新为 FAILED
+    // 3. 发送请求：按会话类型分发到不同接口；成功后 ackMessage 更新为 NORMAL，失败更新为 FAILED
     try {
       if (conversation.type === ImConversationType.PRIVATE) {
         const data = await apiSendPrivateMessage({
@@ -143,12 +143,15 @@ export const useMessageSender = () => {
           type,
           content
         })
-        void messageStore.ackMessage(conversation.type, realTarget, clientMessageId, {
-          id: data.id,
-          sendTime: new Date(data.sendTime).getTime(),
-          status: data.status,
-          content: data.content
-        })
+        void messageStore
+          .ackMessage(conversation.type, realTarget, clientMessageId, {
+            id: data.id,
+            sendTime: new Date(data.sendTime).getTime(),
+            status: data.status,
+            receiptStatus: data.receiptStatus,
+            content: data.content
+          })
+          .catch(() => undefined)
       } else if (conversation.type === ImConversationType.GROUP) {
         const data = await apiSendGroupMessage({
           clientMessageId,
@@ -158,21 +161,25 @@ export const useMessageSender = () => {
           atUserIds: options?.atUserIds,
           receipt: options?.receipt
         })
-        void messageStore.ackMessage(conversation.type, realTarget, clientMessageId, {
-          id: data.id,
-          sendTime: new Date(data.sendTime).getTime(),
-          status: data.status,
-          receiptStatus: data.receiptStatus,
-          readCount: data.readCount,
-          content: data.content
-        })
+        void messageStore
+          .ackMessage(conversation.type, realTarget, clientMessageId, {
+            id: data.id,
+            sendTime: new Date(data.sendTime).getTime(),
+            status: data.status,
+            receiptStatus: data.receiptStatus,
+            readCount: data.readCount,
+            content: data.content
+          })
+          .catch(() => undefined)
       }
       return true
     } catch (e) {
       console.error('[IM] 消息发送失败', { type, realTarget, clientMessageId }, e)
-      void messageStore.ackMessage(conversation.type, realTarget, clientMessageId, {
-        status: ImMessageStatus.FAILED
-      })
+      void messageStore
+        .ackMessage(conversation.type, realTarget, clientMessageId, {
+          status: ImMessageStatus.FAILED
+        })
+        .catch(() => undefined)
       return false
     }
   }
@@ -186,7 +193,7 @@ export const useMessageSender = () => {
       return false
     }
     const payload = withQuotePayload<TextMessage>({ content: text }, options?.quote)
-    return sendRaw(ImMessageType.TEXT, serializeMessage(payload), options)
+    return sendRaw(ImContentType.TEXT, serializeMessage(payload), options)
   }
 
   /**
@@ -214,31 +221,40 @@ export const useMessageSender = () => {
 
   /**
    * 触发当前会话的已读上报（切会话 / 进入页面时调用）
-   * 1. 本端立刻清未读数；服务端回包成功后再做持久化
-   * 2. 已读位置取会话内最大真实消息 id（本地发送中消息跳过）
+   * 1. 本端立刻清未读数并推进读位置
+   * 2. 已读位置取已加载消息和会话末条消息的最大服务端 id
    */
   const readActive = async () => {
     const conversation = conversationStore.activeConversation
     if (!conversation) {
       return
     }
-    // 本地标记已读：未读数清零 + 消息状态更新为 READ（UI 立刻响应）
-    conversationStore.markConversationRead(conversation.type, conversation.targetId)
-    messageStore.markConversationMessageListRead(conversation)
-    const maxMessageId = messageStore
+    const loadedMaxMessageId = messageStore
       .getMessages(getClientConversationId(conversation.type, conversation.targetId))
       .reduce<number>(
         (maxMessageId, message) =>
           message.id && message.id > maxMessageId ? message.id : maxMessageId,
         0
       )
-    if (!maxMessageId) {
+    const maxMessageId = Math.max(loadedMaxMessageId, conversation.lastMessageId || 0)
+    const readReported = conversationStore.isReportedReadPositionCovered(
+      conversation.type,
+      conversation.targetId,
+      maxMessageId
+    )
+    if (readReported) {
+      conversationStore.markConversationRead(conversation.type, conversation.targetId)
       return
     }
-    // 接口调用：按会话类型分发，并按对应已读开关控制；失败仅记录日志，不回退本地已读状态
     const isPrivate = conversation.type === ImConversationType.PRIVATE
     const isGroup = conversation.type === ImConversationType.GROUP
     const isChannel = conversation.type === ImConversationType.CHANNEL
+    // 本地标记已读：未读数清零（UI 立刻响应）
+    conversationStore.markConversationRead(conversation.type, conversation.targetId, maxMessageId)
+    if (!maxMessageId) {
+      return
+    }
+    // 接口调用：按会话类型分发，并按对应已读开关控制
     if (!isPrivate && !isGroup && !isChannel) {
       return
     }
@@ -256,6 +272,11 @@ export const useMessageSender = () => {
       } else {
         await apiReadChannelMessages(conversation.targetId, maxMessageId)
       }
+      conversationStore.markConversationReadReported(
+        conversation.type,
+        conversation.targetId,
+        maxMessageId
+      )
     } catch (e) {
       console.error(
         '[IM] 标记已读失败',
@@ -280,13 +301,25 @@ export const useMessageSender = () => {
     if (!MESSAGE_PRIVATE_READ_ENABLED) {
       return
     }
+    const cachedMaxReadId = messageStore.getPrivateReadMaxId(peerId)
+    if (cachedMaxReadId !== undefined) {
+      if (cachedMaxReadId > 0) {
+        messageStore.applyMessageReadReceipt({
+          conversationType: ImConversationType.PRIVATE,
+          targetId: peerId,
+          privateReadMaxId: cachedMaxReadId
+        })
+      }
+      return
+    }
     try {
       // 拉取对方已读到的最大消息 id
       const maxReadId = await apiGetPrivateMaxReadMessageId(peerId)
+      messageStore.updatePrivateReadMaxId(peerId, maxReadId)
       if (!maxReadId) {
         return
       }
-      // applyMessageReadReceipt 内部把 ≤ maxReadId 的本端消息更新为 READ
+      // applyMessageReadReceipt 内部把 ≤ maxReadId 的本端消息回执更新为 DONE
       messageStore.applyMessageReadReceipt({
         conversationType: ImConversationType.PRIVATE,
         targetId: peerId,
