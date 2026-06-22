@@ -301,7 +301,7 @@
                   ChildProcessMultiInstanceSourceTypeEnum.FIXED_QUANTITY
                 "
               >
-                <el-input-number v-model="configForm.multiInstanceSource" :min="1" />
+                <el-input-number v-model="multiInstanceSourceNumber" :min="1" />
               </el-form-item>
               <el-form-item
                 v-if="
@@ -453,6 +453,12 @@ const digitalFormFieldOptions = computed(() => {
 const multiFormFieldOptions = computed(() => {
   return formFieldOptions.filter((item) => item.type === 'select' || item.type === 'checkbox')
 })
+const multiInstanceSourceNumber = computed({
+  get: () => Number(configForm.value.multiInstanceSource || 1),
+  set: (value?: number) => {
+    configForm.value.multiInstanceSource = String(value || '')
+  }
+})
 const childFormFieldOptions = ref()
 
 // 保存配置
@@ -546,7 +552,7 @@ const showChildProcessNodeConfig = (node: SimpleFlowNode) => {
       // 固定时长
       if (configForm.value.timeoutType === DelayTypeEnum.FIXED_TIME_DURATION) {
         const strTimeDuration = node.childProcessSetting.timeoutSetting.timeExpression ?? ''
-        let parseTime = strTimeDuration.slice(2, strTimeDuration.length - 1)
+        let parseTime = strTimeDuration.match(/\d+/)?.[0] ?? ''
         let parseTimeUnit = strTimeDuration.slice(strTimeDuration.length - 1)
         configForm.value.timeDuration = parseInt(parseTime)
         configForm.value.timeUnit = convertTimeUnit(parseTimeUnit)
@@ -603,12 +609,12 @@ const loadFormInfo = async () => {
   }
 }
 const getIsoTimeDuration = () => {
-  let strTimeDuration = 'PT'
+  let strTimeDuration = 'P'
   if (configForm.value.timeUnit === TimeUnitType.MINUTE) {
-    strTimeDuration += configForm.value.timeDuration + 'M'
+    strTimeDuration += 'T' + configForm.value.timeDuration + 'M'
   }
   if (configForm.value.timeUnit === TimeUnitType.HOUR) {
-    strTimeDuration += configForm.value.timeDuration + 'H'
+    strTimeDuration += 'T' + configForm.value.timeDuration + 'H'
   }
   if (configForm.value.timeUnit === TimeUnitType.DAY) {
     strTimeDuration += configForm.value.timeDuration + 'D'

@@ -1,5 +1,4 @@
 <script lang="ts" setup>
-import { resetRouter } from '@/router'
 import { deleteUserCache } from '@/hooks/web/useCache'
 import { useLockStore } from '@/store/modules/lock'
 import { useNow } from '@/hooks/web/useNow'
@@ -107,7 +106,7 @@ function handleShowForm(show = false) {
             {{ t('lock.message') }}
           </span>
           <div :class="`${prefixCls}-entry__footer enter-x`">
-            <ElButton
+            <el-button
               type="primary"
               size="small"
               class="mt-2 mr-2 enter-x"
@@ -116,8 +115,8 @@ function handleShowForm(show = false) {
               @click="handleShowForm(true)"
             >
               {{ t('common.back') }}
-            </ElButton>
-            <ElButton
+            </el-button>
+            <el-button
               type="primary"
               size="small"
               class="mt-2 mr-2 enter-x"
@@ -126,8 +125,8 @@ function handleShowForm(show = false) {
               @click="goLogin"
             >
               {{ t('lock.backToLogin') }}
-            </ElButton>
-            <ElButton
+            </el-button>
+            <el-button
               type="primary"
               class="mt-2"
               size="small"
@@ -136,7 +135,7 @@ function handleShowForm(show = false) {
               :disabled="loading"
             >
               {{ t('lock.entrySystem') }}
-            </ElButton>
+            </el-button>
           </div>
         </div>
       </div>
