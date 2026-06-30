@@ -311,7 +311,7 @@ const handleTabClick = (tab: TabsPaneContext) => {
 
 /** 获得每个 Tab 的数量 */
 const getTabsCount = async () => {
-  const res = await ProductSpuApi.getTabsCount()
+  const res = await ProductSpuApi.getTabsCount(queryParams.value)
   for (let objName in res) {
     tabsData.value[Number(objName)].count = res[objName]
   }
@@ -380,6 +380,7 @@ const imagePreview = (imgUrl: string) => {
 /** 搜索按钮操作 */
 const handleQuery = () => {
   getList()
+  getTabsCount() // 搜索后同步刷新 tab 数量（跟随筛选）
 }
 
 /** 重置按钮操作 */
