@@ -25,50 +25,14 @@ const tasks = ref([])
 // 流程实例
 const processInstance = ref()
 
-/** 监控模型视图 包括任务列表、进行中的活动节点编号等 */
-watch(
-  () => props.modelView,
-  async (newModelView) => {
-    if (newModelView) {
-      tasks.value = newModelView.tasks
-      processInstance.value = newModelView.processInstance
-      // 已经拒绝的活动节点编号集合，只包括 UserTask
-      const rejectedTaskActivityIds: string[] = newModelView.rejectedTaskActivityIds
-      // 进行中的活动节点编号集合， 只包括 UserTask
-      const unfinishedTaskActivityIds: string[] = newModelView.unfinishedTaskActivityIds
-      // 已经完成的活动节点编号集合， 包括 UserTask、Gateway 等
-      const finishedActivityIds: string[] = newModelView.finishedTaskActivityIds
-      // 已经完成的连线节点编号集合，只包括 SequenceFlow
-      const finishedSequenceFlowActivityIds: string[] = newModelView.finishedSequenceFlowActivityIds
-      setSimpleModelNodeTaskStatus(
-        newModelView.simpleModel,
-        newModelView.processInstance?.status,
-        rejectedTaskActivityIds,
-        unfinishedTaskActivityIds,
-        finishedActivityIds,
-        finishedSequenceFlowActivityIds
-      )
-      simpleModel.value = newModelView.simpleModel ? newModelView.simpleModel : {}
-    }
-  }
-)
-/** 监控模型结构数据 */
-watch(
-  () => props.simpleJson,
-  async (value) => {
-    if (value) {
-      simpleModel.value = JSON.parse(value)
-    }
-  }
-)
-const setSimpleModelNodeTaskStatus = (
+function setSimpleModelNodeTaskStatus(
   simpleModel: SimpleFlowNode | undefined,
   processStatus: number,
   rejectedTaskActivityIds: string[],
   unfinishedTaskActivityIds: string[],
   finishedActivityIds: string[],
   finishedSequenceFlowActivityIds: string[]
-) => {
+) {
   if (!simpleModel) {
     return
   }
@@ -169,6 +133,43 @@ const setSimpleModelNodeTaskStatus = (
     finishedSequenceFlowActivityIds
   )
 }
+
+/** 监控模型视图 包括任务列表、进行中的活动节点编号等 */
+watch(
+  () => props.modelView,
+  async (newModelView) => {
+    if (newModelView) {
+      tasks.value = newModelView.tasks
+      processInstance.value = newModelView.processInstance
+      // 已经拒绝的活动节点编号集合，只包括 UserTask
+      const rejectedTaskActivityIds: string[] = newModelView.rejectedTaskActivityIds
+      // 进行中的活动节点编号集合， 只包括 UserTask
+      const unfinishedTaskActivityIds: string[] = newModelView.unfinishedTaskActivityIds
+      // 已经完成的活动节点编号集合， 包括 UserTask、Gateway 等
+      const finishedActivityIds: string[] = newModelView.finishedTaskActivityIds
+      // 已经完成的连线节点编号集合，只包括 SequenceFlow
+      const finishedSequenceFlowActivityIds: string[] = newModelView.finishedSequenceFlowActivityIds
+      setSimpleModelNodeTaskStatus(
+        newModelView.simpleModel,
+        newModelView.processInstance?.status,
+        rejectedTaskActivityIds,
+        unfinishedTaskActivityIds,
+        finishedActivityIds,
+        finishedSequenceFlowActivityIds
+      )
+      simpleModel.value = newModelView.simpleModel ? newModelView.simpleModel : {}
+    }
+  }
+)
+/** 监控模型结构数据 */
+watch(
+  () => props.simpleJson,
+  async (value) => {
+    if (value) {
+      simpleModel.value = JSON.parse(value)
+    }
+  }
+)
 </script>
 
 <style lang="scss" scoped></style>

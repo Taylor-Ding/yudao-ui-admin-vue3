@@ -1,10 +1,13 @@
 import { defineStore, acceptHMRUpdate } from 'pinia'
 import { store } from '@/store'
 import { getSimpleChannelList, type ImManagerChannelVO } from '@/api/im/manager/channel'
+import { getCurrentUserId } from '@/utils/auth'
 import { useConversationStore } from './conversationStore'
 import { ImConversationType } from '../../utils/constants'
 import { getDb } from '../../utils/db'
 import type { ChannelDO } from '../types'
+
+let storeEpoch = 0 // clear 时递增；旧账号请求返回后不得写入新账号状态
 
 /**
  * IM 频道 Store
@@ -29,30 +32,44 @@ export const useChannelStore = defineStore('imChannelStore', {
 
     /** 从 IndexedDB 恢复频道列表 */
     async loadChannelList(): Promise<boolean> {
+      const requestEpoch = storeEpoch
+      const requestUserId = getCurrentUserId()
       try {
         const cached = await getDb().getAll<ChannelDO>('channels')
+        if (requestEpoch !== storeEpoch || getCurrentUserId() !== requestUserId) {
+          return false
+        }
         if (!cached || cached.length === 0) {
           return false
         }
         this.channels = cached
         return true
       } catch (e) {
-        console.warn('[IM channelStore] 本地频道缓存读取失败', e)
+        if (requestEpoch === storeEpoch && getCurrentUserId() === requestUserId) {
+          console.warn('[IM channelStore] 本地频道缓存读取失败', e)
+        }
         return false
       }
     },
 
     /** 保存频道列表 */
     saveChannelList(): void {
+      const requestEpoch = storeEpoch
+      const requestUserId = getCurrentUserId()
+      const channels = [...this.channels]
       void getDb()
         .transaction(['channels'], 'readwrite', async (tx) => {
           const db = getDb()
           await db.clearStore('channels', tx)
-          for (const channel of this.channels) {
+          for (const channel of channels) {
             await db.put('channels', channel, tx)
           }
         })
-        .catch((e) => console.warn('[IM channelStore] 本地频道缓存写入失败', e))
+        .catch((e) => {
+          if (requestEpoch === storeEpoch && getCurrentUserId() === requestUserId) {
+            console.warn('[IM channelStore] 本地频道缓存写入失败', e)
+          }
+        })
     },
 
     // ==================== 远端拉取 ====================
@@ -62,13 +79,21 @@ export const useChannelStore = defineStore('imChannelStore', {
       if (this.loaded && !force) {
         return
       }
+      const requestEpoch = storeEpoch
+      const requestUserId = getCurrentUserId()
       try {
-        this.channels = (await getSimpleChannelList()) || []
+        const channels = (await getSimpleChannelList()) || []
+        if (requestEpoch !== storeEpoch || getCurrentUserId() !== requestUserId) {
+          return
+        }
+        this.channels = channels
         this.loaded = true
         this.syncChannelConversationMetadata()
         this.saveChannelList()
       } catch (e) {
-        console.warn('[IM channelStore] fetchChannelList 失败', e)
+        if (requestEpoch === storeEpoch && getCurrentUserId() === requestUserId) {
+          console.warn('[IM channelStore] fetchChannelList 失败', e)
+        }
       }
     },
 
@@ -93,6 +118,7 @@ export const useChannelStore = defineStore('imChannelStore', {
 
     /** 清空频道内存 */
     clear() {
+      storeEpoch++
       this.channels = []
       this.loaded = false
     }

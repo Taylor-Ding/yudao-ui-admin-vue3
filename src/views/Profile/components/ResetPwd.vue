@@ -33,12 +33,11 @@ const password = reactive({
 })
 
 // 表单校验
-const equalToPassword = (_rule, value, callback) => {
+const equalToPassword = (_rule, value) => {
   if (password.newPassword !== value) {
-    callback(new Error(t('profile.password.diffPwd')))
-  } else {
-    callback()
+    return Promise.reject(new Error(t('profile.password.diffPwd')))
   }
+  return Promise.resolve()
 }
 
 const rules = reactive<FormRules>({

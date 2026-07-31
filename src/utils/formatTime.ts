@@ -8,46 +8,45 @@ export const defaultShortcuts = [
   {
     text: '今天',
     value: () => {
-      return new Date()
+      const date = dayjs()
+      return [date.startOf('day').toDate(), date.endOf('day').toDate()]
     }
   },
   {
     text: '昨天',
     value: () => {
-      const date = new Date()
-      date.setTime(date.getTime() - 3600 * 1000 * 24)
-      return [date, date]
+      const date = dayjs().subtract(1, 'day')
+      return [date.startOf('day').toDate(), date.endOf('day').toDate()]
     }
   },
   {
     text: '最近七天',
     value: () => {
-      const date = new Date()
-      date.setTime(date.getTime() - 3600 * 1000 * 24 * 7)
-      return [date, new Date()]
+      const date = dayjs()
+      // 包含今天在内，共 7 个自然日
+      return [date.subtract(6, 'day').startOf('day').toDate(), date.endOf('day').toDate()]
     }
   },
   {
     text: '最近 30 天',
     value: () => {
-      const date = new Date()
-      date.setTime(date.getTime() - 3600 * 1000 * 24 * 30)
-      return [date, new Date()]
+      const date = dayjs()
+      // 包含今天在内，共 30 个自然日
+      return [date.subtract(29, 'day').startOf('day').toDate(), date.endOf('day').toDate()]
     }
   },
   {
     text: '本月',
     value: () => {
-      const date = new Date()
-      date.setDate(1) // 设置为当前月的第一天
-      return [date, new Date()]
+      const date = dayjs()
+      return [date.startOf('month').toDate(), date.endOf('day').toDate()]
     }
   },
   {
     text: '今年',
     value: () => {
-      const date = new Date()
-      return [new Date(`${date.getFullYear()}-01-01`), date]
+      const date = dayjs()
+      return [date.startOf('year').toDate(), date.endOf('day').toDate()]
     }
   }
 ]

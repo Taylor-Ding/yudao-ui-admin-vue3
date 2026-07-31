@@ -149,10 +149,11 @@ import { BpmProcessInstanceStatus } from '@/utils/constants'
 
 const props = defineProps({
   xml: {
+    default: '',
     type: String,
-    required: true
   },
   view: {
+    default: () => ({}),
     type: Object,
     require: true
   }
@@ -296,12 +297,12 @@ const onSelectElement = (element: any) => {
 }
 
 /** 初始化 BPMN 视图 */
-const importXML = async (xml: string) => {
+const importXML = async (xml?: string) => {
   // 清空流程图
   clearViewer()
 
   // 初始化流程图
-  if (xml != null && xml !== '') {
+  if (xml) {
     try {
       bpmnViewer.value = new BpmnViewer({
         additionalModules: [MoveCanvasModule],
@@ -408,7 +409,7 @@ const setProcessStatus = (view: any) => {
 watch(
   () => props.xml,
   (newXml) => {
-    importXML(newXml)
+    importXML(newXml || '')
   },
   { immediate: true }
 )
@@ -423,7 +424,7 @@ watch(
 
 /** mounted：初始化 */
 onMounted(() => {
-  importXML(props.xml)
+  importXML(props.xml || '')
   setProcessStatus(props.view)
 })
 

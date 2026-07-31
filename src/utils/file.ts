@@ -7,14 +7,26 @@ export const getFileNameFromUrl = (url: string): string => {
     return decodeURIComponent(fileName)
   } catch {
     // 如果 URL 解析失败，尝试从字符串中提取
-    const parts = url.split('/')
-    return parts[parts.length - 1] || 'unknown'
+    const cleanUrl = url.split(/[?#]/)[0]
+    const parts = cleanUrl.split('/')
+    const fileName = parts[parts.length - 1] || 'unknown'
+    try {
+      return decodeURIComponent(fileName)
+    } catch {
+      return fileName
+    }
   }
+}
+
+/** 获取文件扩展名 */
+export const getFileExtension = (filename: string): string => {
+  const cleanName = filename.split(/[?#]/)[0]
+  return cleanName.split('.').pop()?.toLowerCase() || ''
 }
 
 /** 判断是否为图片 */
 export const isImage = (filename: string): boolean => {
-  const ext = filename.split('.').pop()?.toLowerCase() || ''
+  const ext = getFileExtension(filename)
   return ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(ext)
 }
 
@@ -29,7 +41,7 @@ export const formatFileSize = (bytes: number): string => {
 
 /** 获取文件图标 */
 export const getFileIcon = (filename: string): string => {
-  const ext = filename.split('.').pop()?.toLowerCase() || ''
+  const ext = getFileExtension(filename)
   if (isImage(ext)) {
     return 'ep:picture'
   }

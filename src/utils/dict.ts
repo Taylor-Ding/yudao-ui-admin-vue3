@@ -152,6 +152,7 @@ export enum DICT_TYPE {
   BPM_TASK_CANDIDATE_STRATEGY = 'bpm_task_candidate_strategy',
   BPM_PROCESS_INSTANCE_STATUS = 'bpm_process_instance_status',
   BPM_TASK_STATUS = 'bpm_task_status',
+  BPM_COMMENT_TYPE = 'bpm_comment_type',
   BPM_OA_LEAVE_TYPE = 'bpm_oa_leave_type',
   BPM_PROCESS_LISTENER_TYPE = 'bpm_process_listener_type',
   BPM_PROCESS_LISTENER_VALUE_TYPE = 'bpm_process_listener_value_type',

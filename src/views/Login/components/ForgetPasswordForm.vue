@@ -139,14 +139,14 @@ const { handleBackLogin, getLoginState, setLoginState } = useLoginState()
 const getShow = computed(() => unref(getLoginState) === LoginStateEnum.RESET_PASSWORD)
 const captchaType = ref('blockPuzzle') // blockPuzzle 滑块 clickWord 点击文字 pictureWord 文字验证码
 
-const validatePass2 = (_rule, value, callback) => {
+const validatePass2 = (_rule, value) => {
   if (value === '') {
-    callback(new Error('请再次输入密码'))
-  } else if (value !== resetPasswordData.password) {
-    callback(new Error('两次输入密码不一致!'))
-  } else {
-    callback()
+    return Promise.reject(new Error('请再次输入密码'))
   }
+  if (value !== resetPasswordData.password) {
+    return Promise.reject(new Error('两次输入密码不一致!'))
+  }
+  return Promise.resolve()
 }
 
 const rules = {

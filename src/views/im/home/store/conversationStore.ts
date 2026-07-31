@@ -4,6 +4,7 @@ import { store } from '@/store'
 
 import { CONVERSATION_RECENT_FORWARD_MAX } from '../../utils/config'
 import {
+  IM_AT_ALL_USER_ID,
   ImConversationType,
   ImMessageReceiptStatus,
   ImMessageStatus,
@@ -67,6 +68,8 @@ function toConversationDO(conversation: Conversation): ConversationDO {
     silent: conversation.silent,
     atMe: conversation.atMe,
     atAll: conversation.atAll,
+    atMessageId: conversation.atMessageId,
+    atAllMessageId: conversation.atAllMessageId,
     draft: draft ? { ...draft, reply: draft.reply ? { ...draft.reply } : undefined } : undefined,
     clientConversationId: getClientConversationId(conversation.type, conversation.targetId)
   }
@@ -100,22 +103,156 @@ function isValidConversationReadRecord(record: ImConversationReadRespVO): boolea
   return !!record.conversationType && !!record.targetId && !!record.messageId
 }
 
-/** 获取对方普通消息最大编号 */
-function getMaxIncomingNormalMessageId(
-  messages: Array<Pick<MessageDO, 'id' | 'selfSend' | 'type' | 'status'>>
-): number {
-  return messages.reduce((maxMessageId, message) => {
+/** 按读位置重算会话未读与 @ 状态 */
+function applyConversationUnreadState(
+  conversation: Conversation,
+  messages: MessageDO[],
+  readMessageId: number
+): boolean {
+  const currentUserId = getCurrentUserId()
+  let unreadCount = 0
+  let atMessageId: number | undefined
+  let atAllMessageId: number | undefined
+  for (const message of messages) {
     if (
-      message.id &&
-      !message.selfSend &&
-      isNormalMessage(message.type) &&
-      message.status !== ImMessageStatus.RECALL &&
-      message.id > maxMessageId
+      !message.id ||
+      message.id <= readMessageId ||
+      message.selfSend ||
+      !isNormalMessage(message.type) ||
+      message.status === ImMessageStatus.RECALL
     ) {
-      return message.id
+      continue
     }
-    return maxMessageId
-  }, 0)
+    unreadCount++
+    if (
+      currentUserId &&
+      message.atUserIds?.includes(currentUserId) &&
+      message.id > (atMessageId || 0)
+    ) {
+      atMessageId = message.id
+    }
+    if (
+      message.atUserIds?.includes(IM_AT_ALL_USER_ID) &&
+      message.id > (atAllMessageId || 0)
+    ) {
+      atAllMessageId = message.id
+    }
+  }
+  const changed =
+    conversation.unreadCount !== unreadCount ||
+    conversation.atMe !== !!atMessageId ||
+    conversation.atAll !== !!atAllMessageId ||
+    conversation.atMessageId !== atMessageId ||
+    conversation.atAllMessageId !== atAllMessageId
+  conversation.unreadCount = unreadCount
+  conversation.atMe = !!atMessageId
+  conversation.atAll = !!atAllMessageId
+  conversation.atMessageId = atMessageId
+  conversation.atAllMessageId = atAllMessageId
+  return changed
+}
+
+/** 无读位置时按原未读窗口应用撤回状态 */
+function applyConversationRecallStateWithoutRead(
+  conversation: Conversation,
+  messages: MessageDO[],
+  originalMessage: MessageDO
+): boolean {
+  const previousUnreadCount = conversation.unreadCount
+  const originalWasIncomingNormal =
+    !!originalMessage.id &&
+    !originalMessage.selfSend &&
+    isNormalMessage(originalMessage.type) &&
+    originalMessage.status !== ImMessageStatus.RECALL
+  const incomingNormalMessages = messages
+    .filter(
+      (message) =>
+        !!message.id &&
+        !message.selfSend &&
+        isNormalMessage(message.type) &&
+        message.status !== ImMessageStatus.RECALL
+    )
+    .sort((left, right) => (right.id || 0) - (left.id || 0))
+  const previousUnreadMessages = [
+    ...incomingNormalMessages.filter((message) => message.id !== originalMessage.id),
+    ...(originalWasIncomingNormal ? [originalMessage] : [])
+  ]
+    .sort((left, right) => (right.id || 0) - (left.id || 0))
+    .slice(0, previousUnreadCount)
+  const recalledUnread = previousUnreadMessages.some(
+    (message) => message.id === originalMessage.id
+  )
+  const unreadCount = Math.max(0, previousUnreadCount - (recalledUnread ? 1 : 0))
+  const unreadMessages = incomingNormalMessages.slice(0, unreadCount)
+  const currentUserId = getCurrentUserId()
+  let atMessageId = conversation.atMessageId
+  let atAllMessageId = conversation.atAllMessageId
+  if (
+    conversation.atMessageId === originalMessage.id ||
+    (!conversation.atMessageId &&
+      conversation.atMe &&
+      !!currentUserId &&
+      originalMessage.atUserIds?.includes(currentUserId))
+  ) {
+    atMessageId = unreadMessages.find((message) =>
+      message.atUserIds?.includes(currentUserId)
+    )?.id
+  }
+  if (
+    conversation.atAllMessageId === originalMessage.id ||
+    (!conversation.atAllMessageId &&
+      conversation.atAll &&
+      originalMessage.atUserIds?.includes(IM_AT_ALL_USER_ID))
+  ) {
+    atAllMessageId = unreadMessages.find((message) =>
+      message.atUserIds?.includes(IM_AT_ALL_USER_ID)
+    )?.id
+  }
+  const changed =
+    conversation.unreadCount !== unreadCount ||
+    conversation.atMe !== !!atMessageId ||
+    conversation.atAll !== !!atAllMessageId ||
+    conversation.atMessageId !== atMessageId ||
+    conversation.atAllMessageId !== atAllMessageId
+  conversation.unreadCount = unreadCount
+  conversation.atMe = !!atMessageId
+  conversation.atAll = !!atAllMessageId
+  conversation.atMessageId = atMessageId
+  conversation.atAllMessageId = atAllMessageId
+  return changed
+}
+
+/** 为旧会话回填未读 @ 消息编号 */
+function backfillConversationMentionIds(
+  conversation: Conversation,
+  messages: MessageDO[]
+): boolean {
+  const currentUserId = getCurrentUserId()
+  const unreadMessages = messages
+    .filter(
+      (message) =>
+        !!message.id &&
+        !message.selfSend &&
+        isNormalMessage(message.type) &&
+        message.status !== ImMessageStatus.RECALL
+    )
+    .sort((left, right) => (right.id || 0) - (left.id || 0))
+    .slice(0, conversation.unreadCount)
+  const atMessageId =
+    conversation.atMessageId ||
+    (conversation.atMe && currentUserId
+      ? unreadMessages.find((message) => message.atUserIds?.includes(currentUserId))?.id
+      : undefined)
+  const atAllMessageId =
+    conversation.atAllMessageId ||
+    (conversation.atAll
+      ? unreadMessages.find((message) => message.atUserIds?.includes(IM_AT_ALL_USER_ID))?.id
+      : undefined)
+  const changed =
+    conversation.atMessageId !== atMessageId || conversation.atAllMessageId !== atAllMessageId
+  conversation.atMessageId = atMessageId
+  conversation.atAllMessageId = atAllMessageId
+  return changed
 }
 
 export const useConversationStore = defineStore('imConversationStore', {
@@ -123,6 +260,7 @@ export const useConversationStore = defineStore('imConversationStore', {
     conversations: [] as Conversation[], // 全量会话列表（私聊 + 群聊 + 频道）
     conversationReads: {} as Record<string, ConversationRead>, // 会话读位置
     activeConversation: null as Conversation | null, // 当前激活的会话
+    activeMentionMessageId: undefined as number | undefined, // 当前会话待定位的未读 @ 消息编号
     loading: false, // 是否正在批量加载
     recentForwardConversationKeys: [] as string[] // 最近转发会话 key 列表
   }),
@@ -215,6 +353,7 @@ export const useConversationStore = defineStore('imConversationStore', {
       this.conversations = []
       this.conversationReads = {}
       this.activeConversation = null
+      this.activeMentionMessageId = undefined
       this.recentForwardConversationKeys = []
     },
 
@@ -249,14 +388,10 @@ export const useConversationStore = defineStore('imConversationStore', {
       const changedConversations: Conversation[] = []
       for (const conversation of targetConversations) {
         const record = this.getConversationRead(conversation.type, conversation.targetId)
-        if (!record) {
-          continue
-        }
-        if (this.applyReadToConversation(conversation, record.messageId)) {
-          changedConversations.push(conversation)
-          continue
-        }
-        if (conversation.unreadCount === 0 && !conversation.atMe && !conversation.atAll) {
+        const needsMentionBackfill =
+          (conversation.atMe && !conversation.atMessageId) ||
+          (conversation.atAll && !conversation.atAllMessageId)
+        if (!record && !needsMentionBackfill) {
           continue
         }
         const messages = await getDb().getAllByIndex<MessageDO>(
@@ -264,11 +399,10 @@ export const useConversationStore = defineStore('imConversationStore', {
           'clientConversationId',
           getClientConversationId(conversation.type, conversation.targetId)
         )
-        const maxIncomingMessageId = getMaxIncomingNormalMessageId(messages)
-        if (maxIncomingMessageId > 0 && maxIncomingMessageId <= record.messageId) {
-          conversation.unreadCount = 0
-          conversation.atMe = false
-          conversation.atAll = false
+        const changed = record
+          ? this.applyReadToConversation(conversation, record.messageId, messages)
+          : backfillConversationMentionIds(conversation, messages)
+        if (changed) {
           changedConversations.push(conversation)
         }
       }
@@ -308,17 +442,24 @@ export const useConversationStore = defineStore('imConversationStore', {
     },
 
     /** 应用读位置到会话 */
-    applyReadToConversation(conversation: Conversation, messageId: number): boolean {
-      if (!conversation.lastMessageId || conversation.lastMessageId > messageId) {
-        return false
-      }
-      if (conversation.unreadCount === 0 && !conversation.atMe && !conversation.atAll) {
-        return false
-      }
-      conversation.unreadCount = 0
-      conversation.atMe = false
-      conversation.atAll = false
-      return true
+    applyReadToConversation(
+      conversation: Conversation,
+      messageId: number,
+      messages: MessageDO[]
+    ): boolean {
+      return applyConversationUnreadState(conversation, messages, messageId)
+    },
+
+    /** 应用撤回后的会话未读与 @ 状态 */
+    applyRecallToConversation(
+      conversation: Conversation,
+      messages: MessageDO[],
+      originalMessage: MessageDO
+    ): boolean {
+      const read = this.getConversationRead(conversation.type, conversation.targetId)
+      return read
+        ? applyConversationUnreadState(conversation, messages, read.messageId)
+        : applyConversationRecallStateWithoutRead(conversation, messages, originalMessage)
     },
 
     /** 应用会话读位置 */
@@ -376,16 +517,11 @@ export const useConversationStore = defineStore('imConversationStore', {
           changedReads.set(clientConversationId, next)
         }
 
-        if (conversation && this.applyReadToConversation(conversation, messageId)) {
+        if (
+          conversation &&
+          this.applyReadToConversation(conversation, messageId, await getStoredMessages())
+        ) {
           changedConversations.set(clientConversationId, conversation)
-        } else if (conversation) {
-          const maxIncomingMessageId = getMaxIncomingNormalMessageId(await getStoredMessages())
-          if (maxIncomingMessageId > 0 && maxIncomingMessageId <= messageId) {
-            conversation.unreadCount = 0
-            conversation.atMe = false
-            conversation.atAll = false
-            changedConversations.set(clientConversationId, conversation)
-          }
         }
         if (record.conversationType !== ImConversationType.CHANNEL) {
           continue
@@ -576,6 +712,7 @@ export const useConversationStore = defineStore('imConversationStore', {
 
     /** 设置当前会话 */
     setActiveConversation(conversation: Conversation | null) {
+      this.activeMentionMessageId = conversation?.atMessageId || conversation?.atAllMessageId
       this.activeConversation = conversation
       if (!conversation) {
         return
@@ -583,6 +720,13 @@ export const useConversationStore = defineStore('imConversationStore', {
       // 懒加载消息并保存会话摘要
       void useMessageStore().ensureConversationMessageListLoaded(conversation)
       this.saveConversation(conversation)
+    },
+
+    /** 消费当前会话待定位的未读 @ 消息编号 */
+    consumeActiveMentionMessageId(): number | undefined {
+      const messageId = this.activeMentionMessageId
+      this.activeMentionMessageId = undefined
+      return messageId
     },
 
     /** 创建空会话 */
@@ -638,6 +782,7 @@ export const useConversationStore = defineStore('imConversationStore', {
       }
       if (this.activeConversation === conversation) {
         this.activeConversation = null
+        this.activeMentionMessageId = undefined
       }
       conversation.deleted = true
       // 2. 删除会话关联的消息和草稿
@@ -676,6 +821,8 @@ export const useConversationStore = defineStore('imConversationStore', {
       conversation.unreadCount = 0
       conversation.atMe = false
       conversation.atAll = false
+      conversation.atMessageId = undefined
+      conversation.atAllMessageId = undefined
       if (readMessageIdAdvanced) {
         const record = createConversationRead(type, targetId, messageId)
         this.conversationReads[key] = record

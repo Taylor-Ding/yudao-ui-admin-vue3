@@ -222,13 +222,14 @@ const formRules = reactive({
   type: [{ required: true, message: '请选择条件类型', trigger: 'change' }],
   valueId: [
     {
-      validator: (_rule: any, _value: any, callback: any) => {
+      validator: (_rule: any, _value: any) => {
         // 质量状态类型不使用 valueId，校验 valueCode
         if (formData.value.type === MesWmStockTakingParamTypeEnum.QUALITY_STATUS) {
-          callback(formData.value.valueCode ? undefined : new Error('请选择质量状态'))
-        } else {
-          callback(formData.value.valueId ? undefined : new Error('条件值不能为空'))
+          return formData.value.valueCode
+            ? Promise.resolve()
+            : Promise.reject(new Error('请选择质量状态'))
         }
+        return formData.value.valueId ? Promise.resolve() : Promise.reject(new Error('条件值不能为空'))
       },
       trigger: 'change'
     }

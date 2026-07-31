@@ -1,6 +1,6 @@
 <template>
   <el-card v-loading="loading" class="box-card">
-    <MyProcessViewer key="designer" :xml="view.bpmnXml" :view="view" class="process-viewer" />
+    <MyProcessViewer key="designer" :xml="view.bpmnXml || ''" :view="view" class="process-viewer" />
   </el-card>
 </template>
 <script lang="ts" setup>
@@ -11,7 +11,7 @@ defineOptions({ name: 'BpmProcessInstanceBpmnViewer' })
 
 const props = defineProps({
   loading: propTypes.bool.def(false), // 是否加载中
-  bpmnXml: propTypes.string, // BPMN XML
+  bpmnXml: propTypes.string.def(''), // BPMN XML
   modelView: propTypes.object
 })
 
@@ -26,7 +26,10 @@ watch(
     // 加载最新
     if (newModelView) {
       //@ts-ignore
-      view.value = newModelView
+      view.value = {
+        ...newModelView,
+        bpmnXml: newModelView.bpmnXml || ''
+      }
     }
   }
 )
@@ -35,7 +38,7 @@ watch(
 watch(
   () => props.bpmnXml,
   (value) => {
-    view.value.bpmnXml = value
+    view.value.bpmnXml = value || ''
   }
 )
 </script>

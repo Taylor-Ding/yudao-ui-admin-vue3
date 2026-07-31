@@ -20,6 +20,18 @@ export type DbStoreName =
 
 export type DbTransaction = IDBTransaction
 
+/** 数据库消息分页游标 */
+export interface MessageDOPageCursor {
+  sendTime: number
+  messageKey: string
+}
+
+/** 数据库消息分页结果 */
+export interface MessageDOPageResult {
+  list: MessageDO[]
+  hasMore: boolean
+}
+
 /** IM 本地存储 key */
 export const StorageKeys = {
   localStorage: {
@@ -53,6 +65,7 @@ export const StorageKeys = {
 let currentDb: IDBDatabase | null = null
 let currentUserId: number | null = null
 let currentSession = 0
+let stopPromise: Promise<void> | undefined
 
 /** 校验当前 IM IndexedDB session 仍有效 */
 export function isCurrentDbSession(session: number): boolean {
@@ -165,6 +178,9 @@ function openDb(name: string): Promise<IDBDatabase> {
 
 /** 初始化当前用户 IM DB */
 export async function initDb(): Promise<void> {
+  while (stopPromise) {
+    await stopPromise
+  }
   const userId = getCurrentUserId()
   if (!Number.isFinite(userId) || userId <= 0) {
     throw new Error('当前用户不存在，无法初始化 IM DB')
@@ -172,10 +188,17 @@ export async function initDb(): Promise<void> {
   if (currentDb && currentUserId === userId) {
     return
   }
-  currentDb?.close()
-  currentSession++
+  const session = ++currentSession
+  const previousDb = currentDb
+  currentDb = null
   currentUserId = userId
-  currentDb = await openDb(getDbName(userId))
+  previousDb?.close()
+  const nextDb = await openDb(getDbName(userId))
+  if (!isCurrentDbSession(session) || currentUserId !== userId || getCurrentUserId() !== userId) {
+    nextDb.close()
+    throw new Error('IM DB 初始化已失效')
+  }
+  currentDb = nextDb
 }
 
 /** 关闭当前 IM DB 连接 */
@@ -193,9 +216,11 @@ function getRawDb(): IDBDatabase {
   return currentDb
 }
 
-/** 校验单次写入 session */
-function guardSession(session: number) {
-  if (!isCurrentDbSession(session)) {
+/** 校验单次事务仍属于当前用户与 DB session */
+function guardSession(session: number, userId: number) {
+  if (!isCurrentDbSession(session)
+    || currentUserId !== userId
+    || getCurrentUserId() !== userId) {
     throw new Error('IM DB session 已失效')
   }
 }
@@ -340,7 +365,8 @@ class DbClient {
   ): Promise<T> {
     // 开启事务前校验 session
     const session = getDbSession()
-    guardSession(session)
+    const userId = getCurrentUserId()
+    guardSession(session, userId)
     const tx = getRawDb().transaction(storeNames, mode)
     const done = transactionDone(tx)
     let result: T
@@ -356,25 +382,26 @@ class DbClient {
     }
     // commit 后再次校验 session
     await done
-    guardSession(session)
+    guardSession(session, userId)
     return result
   }
 
   /** 按会话分页获取消息 */
   async getMessageListByConversation(
     clientConversationId: string,
-    options?: { beforeSendTime?: number; limit?: number },
+    options?: { before?: MessageDOPageCursor; limit?: number },
     tx?: DbTransaction
-  ): Promise<MessageDO[]> {
+  ): Promise<MessageDOPageResult> {
     const limit = options?.limit ?? 50
-    const upper = options?.beforeSendTime ?? Number.MAX_SAFE_INTEGER
+    const before = options?.before
+    const upper = before?.sendTime ?? Number.MAX_SAFE_INTEGER
     const range = IDBKeyRange.bound(
       [clientConversationId, 0],
       [clientConversationId, upper],
       false,
-      true
+      !before
     )
-    const read = async (tx: DbTransaction): Promise<MessageDO[]> => {
+    const read = async (tx: DbTransaction): Promise<MessageDOPageResult> => {
       const index = tx.objectStore('messages').index('clientConversationId+sendTime')
       const out: MessageDO[] = []
       await new Promise<void>((resolve, reject) => {
@@ -383,21 +410,37 @@ class DbClient {
         request.onerror = () => reject(request.error)
         request.onsuccess = () => {
           const cursor = request.result
-          if (!cursor || out.length >= limit) {
+          if (!cursor) {
             resolve()
             return
           }
-          out.push(cursor.value as MessageDO)
+          const message = cursor.value as MessageDO
+          if (
+            before &&
+            message.sendTime === before.sendTime &&
+            message.messageKey >= before.messageKey
+          ) {
+            cursor.continue()
+            return
+          }
+          out.push(message)
+          if (out.length > limit) {
+            resolve()
+            return
+          }
           cursor.continue()
         }
       })
       // 气泡渲染需要按时间升序
-      return out.reverse()
+      return {
+        list: out.slice(0, limit).reverse(),
+        hasMore: out.length > limit
+      }
     }
     if (tx) {
       return read(tx)
     }
-    return this.transaction<MessageDO[]>(['messages'], 'readonly', read)
+    return this.transaction<MessageDOPageResult>(['messages'], 'readonly', read)
   }
 
   /** 读取设置 */
@@ -447,29 +490,6 @@ export function getClientMessageKey(clientMessageId: string): string {
   return `client:${clientMessageId}`
 }
 
-/** 解析本地消息主键 */
-export function parseMessageKey(
-  messageKey: string
-):
-  | { kind: 'client'; clientMessageId: string }
-  | { kind: 'server'; conversationType: number; id: number }
-  | null {
-  if (!messageKey) {
-    return null
-  }
-  if (messageKey.startsWith('client:')) {
-    const clientMessageId = messageKey.slice('client:'.length)
-    return clientMessageId ? { kind: 'client', clientMessageId } : null
-  }
-  const [conversationTypeText, idText] = messageKey.split(':')
-  const conversationType = Number(conversationTypeText)
-  const id = Number(idText)
-  if (!Number.isFinite(conversationType) || !Number.isFinite(id) || id <= 0) {
-    return null
-  }
-  return { kind: 'server', conversationType, id }
-}
-
 /** 更新消息拉取游标 */
 export async function setMessageMaxId(
   conversationType: number,
@@ -494,38 +514,57 @@ export async function setMessageMaxId(
       throw new Error(`未知 IM 会话类型：${conversationType}`)
   }
   const db = getDb()
-  const current = (await db.getSetting<number>(key, tx)) || 0
-  if (maxId > current) {
-    await db.setSetting(key, maxId, tx)
+  const updateMaxId = async (transaction: DbTransaction) => {
+    const current = (await db.getSetting<number>(key, transaction)) || 0
+    if (maxId > current) {
+      await db.setSetting(key, maxId, transaction)
+    }
   }
+  if (tx) {
+    await updateMaxId(tx)
+    return
+  }
+  await db.transaction(['settings'], 'readwrite', updateMaxId)
 }
 
 /** 停止当前 IM DB session */
-export async function stopRequests(): Promise<void> {
-  currentSession++
-  const [
-    { useMessageStoreWithOut },
-    { useConversationStoreWithOut },
-    { useFriendStoreWithOut },
-    { useGroupStoreWithOut },
-    { useChannelStoreWithOut },
-    { useGroupRequestStoreWithOut },
-    { useFaceStoreWithOut }
-  ] = await Promise.all([
-    import('../home/store/messageStore'),
-    import('../home/store/conversationStore'),
-    import('../home/store/friendStore'),
-    import('../home/store/groupStore'),
-    import('../home/store/channelStore'),
-    import('../home/store/groupRequestStore'),
-    import('../home/store/faceStore')
-  ])
-  useMessageStoreWithOut().clear()
-  useConversationStoreWithOut().clear()
-  useFriendStoreWithOut().clear()
-  useGroupStoreWithOut().clear()
-  useChannelStoreWithOut().clear()
-  useGroupRequestStoreWithOut().clear()
-  useFaceStoreWithOut().clear()
+export function stopRequests(): Promise<void> {
+  const session = ++currentSession
   closeDbConnection()
+  const task = (async () => {
+    const [
+      { useMessageStoreWithOut },
+      { useConversationStoreWithOut },
+      { useFriendStoreWithOut },
+      { useGroupStoreWithOut },
+      { useChannelStoreWithOut },
+      { useGroupRequestStoreWithOut },
+      { useFaceStoreWithOut }
+    ] = await Promise.all([
+      import('../home/store/messageStore'),
+      import('../home/store/conversationStore'),
+      import('../home/store/friendStore'),
+      import('../home/store/groupStore'),
+      import('../home/store/channelStore'),
+      import('../home/store/groupRequestStore'),
+      import('../home/store/faceStore')
+    ])
+    if (!isCurrentDbSession(session)) {
+      return
+    }
+    useMessageStoreWithOut().clear()
+    useConversationStoreWithOut().clear()
+    useFriendStoreWithOut().clear()
+    useGroupStoreWithOut().clear()
+    useChannelStoreWithOut().clear()
+    useGroupRequestStoreWithOut().clear()
+    useFaceStoreWithOut().clear()
+  })()
+  const settled = task.finally(() => {
+    if (stopPromise === settled) {
+      stopPromise = undefined
+    }
+  })
+  stopPromise = settled
+  return settled
 }

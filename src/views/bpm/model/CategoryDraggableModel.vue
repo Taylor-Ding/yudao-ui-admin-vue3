@@ -210,6 +210,9 @@
                   <el-dropdown-item command="handleDefinitionList" v-if="hasPermiPdQuery">
                     历史
                   </el-dropdown-item>
+                  <el-dropdown-item command="handleExport" v-if="hasPermiExport">
+                    导出
+                  </el-dropdown-item>
                   <el-dropdown-item
                     command="handleReport"
                     v-if="
@@ -289,6 +292,7 @@ import { useAppStore } from '@/store/modules/app'
 import { cloneDeep, isEqual } from 'lodash-es'
 import { useDebounceFn } from '@vueuse/core'
 import { subString } from '@/utils/index'
+import download from '@/utils/download'
 
 defineOptions({ name: 'BpmModel' })
 
@@ -361,8 +365,16 @@ const hasPermiDelete = computed(() => {
 const hasPermiDeploy = computed(() => {
   return checkPermi(['bpm:model:deploy'])
 })
+const hasPermiExport = computed(() => {
+  return checkPermi(['bpm:model:export'])
+})
 const hasPermiMore = computed(() => {
-  return checkPermi(['bpm:process-definition:query', 'bpm:model:update', 'bpm:model:delete'])
+  return checkPermi([
+    'bpm:process-definition:query',
+    'bpm:model:update',
+    'bpm:model:delete',
+    'bpm:model:export'
+  ])
 })
 const hasPermiPdQuery = computed(() => {
   return checkPermi(['bpm:process-definition:query'])
@@ -376,6 +388,9 @@ const handleModelCommand = (command: string, row: any) => {
       break
     case 'handleDelete':
       handleDelete(row)
+      break
+    case 'handleExport':
+      handleExport(row)
       break
     case 'handleChangeState':
       handleChangeState(row)
@@ -395,6 +410,12 @@ const handleModelCommand = (command: string, row: any) => {
     default:
       break
   }
+}
+
+const handleExport = async (row: any) => {
+  const data = await ModelApi.exportModel(row.id)
+  download.json(new Blob([JSON.stringify(data, null, 2)]), `${row.key || row.name || 'model'}.json`)
+  message.success('导出成功')
 }
 
 /** '分类'操作按钮 */

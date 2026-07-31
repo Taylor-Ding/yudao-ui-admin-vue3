@@ -111,7 +111,7 @@ const fApi = ref<FormCreateApi>()
 const startUserSelectTasks: any = ref([]) // 发起人需要选择审批人或抄送人的任务列表
 const startUserSelectAssignees = ref({}) // 发起人选择审批人的数据
 const tempStartUserSelectAssignees = ref({}) // 历史发起人选择审批人的数据，用于每次表单变更时，临时保存
-const bpmnXML: any = ref(null) // BPMN 数据
+const bpmnXML = ref('') // BPMN 数据
 const simpleJson = ref<string | undefined>() // Simple 设计器数据 json 格式
 
 const activeTab = ref('form') // 当前的 Tab

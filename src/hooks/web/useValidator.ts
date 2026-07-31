@@ -29,25 +29,23 @@ export const useValidator = () => {
 
   const notSpace = (message?: string): FormItemRule => {
     return {
-      validator: (_, val, callback) => {
+      validator: ((_, val) => {
         if (val?.indexOf(' ') !== -1) {
-          callback(new Error(message || t('common.notSpace')))
-        } else {
-          callback()
+          return Promise.reject(new Error(message || t('common.notSpace')))
         }
-      }
+        return Promise.resolve()
+      }) as any
     }
   }
 
   const notSpecialCharacters = (message?: string): FormItemRule => {
     return {
-      validator: (_, val, callback) => {
+      validator: ((_, val) => {
         if (/[`~!@#$%^&*()_+<>?:"{},.\/;'[\]]/gi.test(val)) {
-          callback(new Error(message || t('common.notSpecialCharacters')))
-        } else {
-          callback()
+          return Promise.reject(new Error(message || t('common.notSpecialCharacters')))
         }
-      }
+        return Promise.resolve()
+      }) as any
     }
   }
 

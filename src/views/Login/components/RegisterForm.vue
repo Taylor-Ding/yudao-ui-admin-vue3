@@ -120,12 +120,11 @@ const captchaType = ref('blockPuzzle') // blockPuzzle 滑块 clickWord 点击文
 
 const getShow = computed(() => unref(getLoginState) === LoginStateEnum.REGISTER)
 
-const equalToPassword = (_rule, value, callback) => {
+const equalToPassword = (_rule, value) => {
   if (registerData.registerForm.password !== value) {
-    callback(new Error('两次输入的密码不一致'))
-  } else {
-    callback()
+    return Promise.reject(new Error('两次输入的密码不一致'))
   }
+  return Promise.resolve()
 }
 
 const registerRules = {
