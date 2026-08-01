@@ -1,4 +1,4 @@
-import { getDb } from './db'
+import type { DbClient } from './db'
 
 /**
  * IM 状态事件补偿（增量拉取）通用编排
@@ -9,7 +9,7 @@ import { getDb } from './db'
  */
 
 /** 增量拉取游标：上次拉到的位置 */
-export interface PullCursor {
+interface PullCursor {
   lastUpdateTime?: number
   lastId?: number
 }
@@ -30,8 +30,8 @@ const PULL_OVERLAP_MS = 5000
 const MIN_ID_PULL_MAX_PAGES = 1000
 
 /** 读取某模块的拉取游标；无则返回空游标（首次拉全量） */
-export async function getPullCursor(key: string): Promise<PullCursor> {
-  return (await getDb().getSetting<PullCursor>(key)) ?? {}
+async function getPullCursor(db: DbClient, key: string): Promise<PullCursor> {
+  return (await db.getSetting<PullCursor>(key)) ?? {}
 }
 
 /**
@@ -43,35 +43,26 @@ export async function getPullCursor(key: string): Promise<PullCursor> {
  *              此时不推进游标并终止本轮，避免游标越过未落地的记录、导致后续增量永久漏拉。可返回 Promise
  */
 export async function runIncrementalPull<T extends PullRecord>(
+  db: DbClient,
   cursorKey: string,
   fetchPage: (params: { lastUpdateTime?: number; lastId?: number; limit: number }) => Promise<T[]>,
-  apply: (records: T[]) => boolean | Promise<boolean>,
-  isActive?: () => boolean
+  apply: (records: T[]) => boolean | Promise<boolean>
 ): Promise<void> {
-  const storedCursor = await getPullCursor(cursorKey)
+  const storedCursor = await getPullCursor(db, cursorKey)
   const highWater = { ...storedCursor }
   let cursor =
     storedCursor.lastUpdateTime != null
       ? { lastUpdateTime: Math.max(0, storedCursor.lastUpdateTime - PULL_OVERLAP_MS), lastId: 0 }
       : {}
   for (let page = 0; page < PULL_MAX_PAGES; page++) {
-    if (isActive && !isActive()) {
-      return
-    }
     const list = await fetchPage({
       lastUpdateTime: cursor.lastUpdateTime,
       lastId: cursor.lastId,
       limit: PULL_PAGE_SIZE
     })
-    if (isActive && !isActive()) {
-      return
-    }
     if (list.length) {
       // apply 未完全落地（返回 false）时直接终止：游标只能跟着已落地的数据走，否则会跳过本页记录
       if ((await apply(list)) === false) {
-        return
-      }
-      if (isActive && !isActive()) {
         return
       }
       // 推进游标到本页最后一条并持久化：下次从这里接着拉
@@ -88,7 +79,7 @@ export async function runIncrementalPull<T extends PullRecord>(
       ) {
         highWater.lastUpdateTime = cursor.lastUpdateTime
         highWater.lastId = cursor.lastId
-        await getDb().setSetting(cursorKey, highWater)
+        await db.setSetting(cursorKey, highWater)
       }
     }
     // 不满一页 = 没有更多变更

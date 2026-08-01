@@ -143,7 +143,7 @@ export interface Message {
   selfSend: boolean // 是否自己发送（前端按 senderId 计算）
   uploadProgress?: number // 媒体消息上传进度（0-100）；status=SENDING 期间持续更新；ack 后置 undefined
   // 媒体消息内存中保留的原始 File；下划线前缀表示不进 JSON / 不持久化（IDB 恢复后必为 undefined）
-  // 失败重试时按它重走上传；页面刷新后该字段丢失，恢复阶段直接 drop 整条消息
+  // 失败重试时按它重走上传；页面刷新后该字段丢失，恢复阶段标记本地临时文件失效
   _localFile?: File
   _ackMerging?: boolean // ack 合并中标记，不持久化
 }

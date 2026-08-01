@@ -140,7 +140,7 @@ export default {
     codePlaceholder: 'Please Enter Verification Code',
     mobileTitle: 'Mobile sign in',
     mobileNumber: 'Mobile Number',
-    mobileNumberPlaceholder: 'Plaease Enter Mobile Number',
+    mobileNumberPlaceholder: 'Please Enter Mobile Number',
     backLogin: 'back',
     getSmsCode: 'Get SMS Code',
     btnMobile: 'Mobile sign in',
@@ -443,7 +443,7 @@ export default {
       truephone: 'Please Enter The Correct Phone Number'
     },
     password: {
-      oldPassword: 'Old PassWord',
+      oldPassword: 'Old Password',
       newPassword: 'New Password',
       confirmPassword: 'Confirm Password',
       oldPwdMsg: 'Please Enter Old Password',
@@ -464,6 +464,6 @@ export default {
     btn_scale_y: 'Flip vertical',
     btn_zoom_in: 'Zoom in',
     btn_zoom_out: 'Zoom out',
-    preview: 'Preivew'
+    preview: 'Preview'
   }
 }
