@@ -67,7 +67,7 @@ async function open(employeeId: number, attendanceDate: string) {
     // 获取详情数据
     detailData.value = await AttendanceStatisticsApi.getAttendanceDailyDetail({
       employeeId,
-      attendanceTime: formatDate(attendanceDate)
+      attendanceTime: formatDate(attendanceDate, 'YYYY-MM-DD HH:mm:ss')
     })
   } finally {
     loading.value = false

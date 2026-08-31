@@ -217,7 +217,7 @@ async function loadShift(applyDefaultTime = false) {
   try {
     shiftInfo.value = await AttendanceClockApi.getAttendanceClockShift({
       employeeId: formData.value.employeeId,
-      attendanceTime: formatDate(formData.value.attendanceTime)
+      attendanceTime: formatDate(formData.value.attendanceTime, 'YYYY-MM-DD HH:mm:ss')
     })
     if (applyDefaultTime) {
       applyShiftDefaultTime()
