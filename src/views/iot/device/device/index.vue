@@ -333,7 +333,7 @@
           >
             查看
           </el-button>
-          <el-button link type="primary" @click="openModel(scope.row.id)"> 日志 </el-button>
+          <el-button link type="primary" @click="openLog(scope.row.id)"> 日志 </el-button>
           <el-button
             link
             type="primary"
@@ -382,6 +382,8 @@ import { DeviceGroupApi, DeviceGroupVO } from '@/api/iot/device/group'
 import download from '@/utils/download'
 import DeviceGroupForm from './DeviceGroupForm.vue'
 import DeviceImportForm from './DeviceImportForm.vue'
+import defaultPicUrl from '@/assets/imgs/iot/device.png'
+import defaultIconUrl from '@/assets/svgs/iot/card-fill.svg'
 
 /** IoT 设备列表 */
 defineOptions({ name: 'IoTDevice' })
@@ -409,8 +411,6 @@ const products = ref<ProductVO[]>([]) // 产品列表
 const deviceGroups = ref<DeviceGroupVO[]>([]) // 设备分组列表
 const selectedIds = ref<number[]>([]) // 选中的设备编号数组
 const viewMode = ref<'card' | 'list'>('card') // 视图模式状态
-const defaultPicUrl = ref('/src/assets/imgs/iot/device.png') // 默认设备图片
-const defaultIconUrl = ref('/src/assets/svgs/iot/card-fill.svg') // 默认设备图标
 
 /** 查询列表 */
 const getList = async () => {
@@ -508,6 +508,10 @@ const openGroupForm = () => {
 /** 打开物模型数据 */
 const openModel = (id: number) => {
   push({ name: 'IoTDeviceDetail', params: { id }, query: { tab: 'model' } })
+}
+
+const openLog = (id: number) => {
+  push({ name: 'IoTDeviceDetail', params: { id }, query: { tab: 'log' } })
 }
 
 /** 设备导入 */

@@ -22,13 +22,16 @@ const contentRef = ref()
 
 const md = new MarkdownIt({
   highlight: function (str, lang) {
+    // 语言标记、代码正文和复制内容均来自不可信输入，输出 HTML 前必须转义
+    const languageHtml = `<span style="position: absolute; left: 10px; top: 5px; color: #fff;">${md.utils.escapeHtml(lang || 'text')}</span>`
+    const copyHtml = `<div id="copy" data-copy="${md.utils.escapeHtml(str)}" style="position: absolute; right: 10px; top: 5px; color: #fff;cursor: pointer;">复制</div>`
+    let codeHtml = md.utils.escapeHtml(str)
     if (lang && hljs.getLanguage(lang)) {
       try {
-        const copyHtml = `<div id="copy" data-copy='${str}' style="position: absolute; right: 10px; top: 5px; color: #fff;cursor: pointer;">复制</div>`
-        return `<pre style="position: relative;">${copyHtml}<code class="hljs">${hljs.highlight(lang, str, true).value}</code></pre>`
+        codeHtml = hljs.highlight(lang, str, true).value
       } catch (__) {}
     }
-    return ``
+    return `<pre style="position: relative;">${languageHtml}${copyHtml}<code class="hljs">${codeHtml}</code></pre>`
   }
 })
 

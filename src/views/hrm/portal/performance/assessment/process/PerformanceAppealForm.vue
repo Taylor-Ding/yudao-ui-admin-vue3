@@ -29,7 +29,7 @@
         <UploadFile
           v-model="formData.appealFileUrls"
           :file-size="20"
-          :limit="1"
+          :limit="5"
           directory="hrm/performance/appeal"
         />
       </el-form-item>
