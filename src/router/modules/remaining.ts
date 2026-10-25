@@ -87,7 +87,8 @@ const remainingRouter: AppRouteRecordRaw[] = [
           hidden: true,
           noTagsView: false,
           icon: 'ep:user',
-          title: t('common.profile')
+          title: t('common.profile'),
+          viewKey: 'Profile' // 社交绑定回调后会去掉地址中的 code 等参数，使用稳定的页面实例标识，避免重建页面
         }
       },
       {
@@ -1080,7 +1081,10 @@ const remainingRouter: AppRouteRecordRaw[] = [
       },
       {
         path: 'agent/session/:agentId',
-        component: () => import('@/views/ai1/agent/session/index.vue'),
+        redirect: (to) => ({
+          path: '/ai1/conversation/session',
+          query: { agentId: to.params.agentId }
+        }),
         name: 'Ai1AgentSession',
         meta: {
           title: '会话记录',

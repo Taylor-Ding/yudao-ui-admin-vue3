@@ -91,7 +91,7 @@
               </el-button>
             </el-col>
             <el-col :span="8">
-              <el-button class="w-full" @click="setLoginState(LoginStateEnum.QR_CODE)">
+              <el-button class="w-full" @click="handleQrcodeLogin">
                 {{ t('login.btnQRCode') }}
               </el-button>
             </el-col>
@@ -145,6 +145,7 @@ import type { RouteLocationNormalizedLoaded } from 'vue-router'
 import { useIcon } from '@/hooks/web/useIcon'
 
 import * as authUtil from '@/utils/auth'
+import { buildSocialRedirectUri } from '@/utils/social'
 import { usePermissionStore } from '@/store/modules/permission'
 import * as LoginApi from '@/api/login'
 import { LoginStateEnum, useFormValid, useLoginState } from './useLogin'
@@ -159,7 +160,7 @@ const iconLock = useIcon({ icon: 'ep:lock' })
 const formLogin = ref()
 const { validForm } = useFormValid(formLogin)
 const { setLoginState, getLoginState } = useLoginState()
-const { currentRoute, push } = useRouter()
+const { currentRoute, push, resolve } = useRouter()
 const permissionStore = usePermissionStore()
 const redirect = ref<string>('')
 const loginLoading = ref(false)
@@ -210,6 +211,11 @@ const getTenantId = async () => {
     const res = await LoginApi.getTenantIdByName(loginData.loginForm.tenantName)
     authUtil.setTenantId(res)
   }
+}
+// 扫码登录与账号登录一样，先确定租户。
+const handleQrcodeLogin = async () => {
+  await getTenantId()
+  setLoginState(LoginStateEnum.QR_CODE)
 }
 // 记住我
 const getLoginFormCache = () => {
@@ -303,10 +309,10 @@ const doSocialLogin = async (type: number) => {
     // 计算 redirectUri
     // 注意: type、redirect 需要先 encode 一次，否则钉钉回调会丢失。
     // 配合 social-login.vue#getUrlValue() 使用
-    const redirectUri =
-      location.origin +
-      '/social-login?' +
-      encodeURIComponent(`type=${type}&redirect=${redirect.value || '/'}`)
+    const redirectUri = buildSocialRedirectUri(resolve('/social-login').href, {
+      type,
+      redirect: redirect.value || '/'
+    })
 
     // 进行跳转
     window.location.href = await LoginApi.socialAuthRedirect(type, encodeURIComponent(redirectUri))
