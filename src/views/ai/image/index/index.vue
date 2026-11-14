@@ -1,4 +1,4 @@
-<!-- AI 绘图：统一创作工作台 -->
+<!-- AI 图片生成：统一创作工作台 -->
 <template>
   <!-- 高度占满可视区域（与 infra/build 等页面一致）：左侧表单、右侧作品各自滚动，生成按钮与分页始终可见 -->
   <div
@@ -10,7 +10,7 @@
       :body-style="{ height: '100%', display: 'flex', flexDirection: 'column' }"
     >
       <div class="mb-16px">
-        <div class="text-16px font-bold">AI 绘图</div>
+        <div class="text-16px font-bold">AI 图片生成</div>
         <div class="mt-4px text-12px text-[var(--el-text-color-secondary)]">
           选择模型后，表单按模型能力显示可用的参数
         </div>
